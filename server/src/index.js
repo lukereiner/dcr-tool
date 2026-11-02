@@ -85,8 +85,36 @@ async function getOrFetchSheet(sheets, tabName) {
 app.get('/api/sheet', async (req, res) => {
   try {
     const tabName = req.query.tab || 'Cable Replacement';
+    const forceRefresh = req.query.refresh === 'true';
+    const cacheKey = `sheet_${tabName}`;
+
+
+    // If refresh was requested, evict the entry immediately
+    if (forceRefresh) {
+      cache.del(cacheKey);
+      console.log(`[FORCE REFRESH] Invalidation requested for ${tabName}`);
+    }
+
+
+    // Now check if cache has it (will be false on forceRefresh)
+    if (cache.has(cacheKey)) {
+      console.log(`[CACHE HIT] Serving ${tabName} from NodeCache`);
+      return res.json({ values: cache.get(cacheKey) });
+    }
+
+
+    console.log(`[CACHE MISS] Fetching fresh ${tabName} from Google Sheets API...`);
     const sheets = getSheetsClient(req.headers.authorization);
-    const values = await getOrFetchSheet(sheets, tabName);
+
+
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `'${tabName}'!A1:ZZ`,
+    });
+
+
+    const values = response.data.values || [];
+    cache.set(cacheKey, values);
 
 
     res.json({ values });

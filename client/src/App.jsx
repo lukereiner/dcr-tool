@@ -4,6 +4,7 @@ import { useGoogleLogin } from '@react-oauth/google';
 import Dashboard from './pages/Dashboard';
 import Data from './pages/Data';
 import DCRReview from './pages/DCRReview';
+import RefreshButton from './components/RefreshButton';
 
 
 export const AuthContext = createContext(null);
@@ -87,7 +88,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
 // ---------------------------------------------------------------------------
 // Top Navigation Header
 // ---------------------------------------------------------------------------
-function NavigationBar() {
+function NavigationBar({ onRefresh, loading, remainingQuota, onLogout }) {
   const location = useLocation();
 
 
@@ -101,10 +102,10 @@ function NavigationBar() {
 
   return (
     <header style={{ background: '#ffffff', borderBottom: '1px solid #dadce0', padding: '0 24px', marginBottom: '24px' }}>
-      <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '60px' }}>
+      <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '64px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
           <div style={{ fontWeight: 700, fontSize: '18px', color: '#1a73e8' }}>
-            OHIO | Project Tracker
+            OHIO | F27 Tracking[cite: 1]
           </div>
 
 
@@ -131,6 +132,26 @@ function NavigationBar() {
             })}
           </nav>
         </div>
+
+
+        {/* Top Right Actions: Force Refresh + Sign Out */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <RefreshButton onRefresh={onRefresh} loading={loading} remainingQuota={remainingQuota} />
+          <button
+            onClick={onLogout}
+            style={{
+              padding: '7px 12px',
+              background: '#f1f3f4',
+              border: '1px solid #dadce0',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              color: '#3c4043',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -154,12 +175,12 @@ export default function App() {
 
 
   const [sessionExpired, setSessionExpired] = useState(false);
-
-
-  // Global shared sheet state
   const [tabName, setTabName] = useState('Cable Replacement');
   const [sheetData, setSheetData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [remainingQuota, setRemainingQuota] = useState(60);
+
+
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -179,44 +200,46 @@ export default function App() {
   };
 
 
-  // Centralized sheet fetch
-  const fetchSheet = async () => {
-    if (!accessToken) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/sheet?tab=${encodeURIComponent(tabName)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+const fetchSheet = async (forceRefresh = false) => {
+  if (!accessToken) return;
+  setLoading(true);
+  try {
+    const isForce = forceRefresh === true;
+    const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${isForce ? '&refresh=true' : ''}`;
+    
+    console.log(`Requesting sheet data: ${url}`);
+    
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
 
-      if (res.status === 401) {
-        logout(true);
-        return;
-      }
-
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-
-      setSheetData(data.values || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+    if (res.status === 401) {
+      logout(true);
+      return;
     }
-  };
 
 
-  // Automatically fetch Cable Replacement on login
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+
+    setSheetData(data.values || []);
+  } catch (err) {
+    console.error('Failed to fetch sheet:', err);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
   useEffect(() => {
     if (accessToken && sheetData.length === 0) {
-      fetchSheet();
+      fetchSheet(false);
     }
   }, [accessToken, tabName]);
 
 
-  // Handle cell/status updates
   const handleRecordUpdated = (sheetRowNumber, colIndex, newValue) => {
     setSheetData((prev) => {
       if (!prev || prev.length < sheetRowNumber) return prev;
@@ -236,7 +259,12 @@ export default function App() {
           <LoginView onLoginSuccess={handleLoginSuccess} sessionExpired={sessionExpired} />
         ) : (
           <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-            <NavigationBar />
+            <NavigationBar
+              onRefresh={fetchSheet}
+              loading={loading}
+              remainingQuota={remainingQuota}
+              onLogout={() => logout(false)}
+            />
 
 
             <main style={{ padding: '0 24px 40px 24px' }}>
