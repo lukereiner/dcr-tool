@@ -1,12 +1,8 @@
 import React, { useState, useMemo } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-} from '@tanstack/react-table';
+import DCRReview from './components/DCRReview';
 
-// Helper: Convert column index to A1 notation (0 -> A, 1 -> B, etc.)
 function colIndexToA1(index) {
   let letter = '';
   let temp = index;
@@ -17,30 +13,24 @@ function colIndexToA1(index) {
   return letter;
 }
 
-// Helper: Extract Google Drive file IDs from cell text (handles comma-separated links)
 function extractDriveFileIds(text) {
   if (!text || typeof text !== 'string') return [];
   const matches = [...text.matchAll(/(?:id=|\/d\/)([a-zA-Z0-9_-]{25,})/g)];
   return matches.map((m) => m[1]);
 }
 
-export default function App() {
-  const [accessToken, setAccessToken] = useState(null);
-  const [tabName, setTabName] = useState('QC Responses');
+function MainDashboard({ accessToken, setAccessToken }) {
+  const navigate = useNavigate();
+  const [tabName, setTabName] = useState('Cable Replacement');
   const [sheetData, setSheetData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [globalFilter, setGlobalFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [editingCell, setEditingCell] = useState(null);
-
-  // Modal preview state for Drive images
   const [previewPhotoId, setPreviewPhotoId] = useState(null);
 
-  // Pagination state
-  const [pagination, setPagination] = useState({
-    pageIndex: 0,
-    pageSize: 50,
-  });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const login = useGoogleLogin({
     scope: 'https://www.googleapis.com/auth/spreadsheets',
@@ -48,10 +38,7 @@ export default function App() {
       setAccessToken(token.access_token);
       setStatusMessage('Signed in successfully.');
     },
-    onError: (err) => {
-      console.error(err);
-      setStatusMessage('Sign-in failed.');
-    },
+    onError: () => setStatusMessage('Google sign-in failed.'),
   });
 
   const fetchSheet = async () => {
@@ -66,7 +53,7 @@ export default function App() {
       if (!res.ok) throw new Error(data.error);
 
       setSheetData(data.values || []);
-      setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+      setPage(1);
       setStatusMessage(`Loaded ${(data.values || []).length} rows.`);
     } catch (err) {
       setStatusMessage(`Error: ${err.message}`);
@@ -75,85 +62,29 @@ export default function App() {
     }
   };
 
-  // Build column definitions and structured rows
-  const { columns, tableData } = useMemo(() => {
-    if (!sheetData || sheetData.length === 0) return { columns: [], tableData: [] };
+  const headers = useMemo(() => sheetData[0] || [], [sheetData]);
+  const rawRows = useMemo(() => sheetData.slice(1) || [], [sheetData]);
 
-    const [headerRow, ...bodyRows] = sheetData;
-
-    const cols = (headerRow || []).map((colName, cIndex) => ({
-      accessorKey: `col_${cIndex}`,
-      header: colName || `Col ${colIndexToA1(cIndex)}`,
-      cell: (info) => {
-        const val = info.getValue() ?? '';
-        const driveIds = extractDriveFileIds(val);
-
-        // If cell contains Drive photo URLs, render interactive preview chips
-        if (driveIds.length > 0) {
-          return (
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }} onClick={(e) => e.stopPropagation()}>
-              {driveIds.map((id, idx) => (
-                <button
-                  key={id}
-                  onClick={() => setPreviewPhotoId(id)}
-                  style={{
-                    padding: '2px 8px',
-                    fontSize: '11px',
-                    borderRadius: '12px',
-                    border: '1px solid #1a73e8',
-                    background: '#e8f0fe',
-                    color: '#1a73e8',
-                    cursor: 'pointer',
-                    fontWeight: 'bold',
-                  }}
-                  title="Click to preview photo"
-                >
-                  📷 Photo {idx + 1}
-                </button>
-              ))}
-            </div>
-          );
-        }
-
-        return String(val);
-      },
-    }));
-
-    const rows = (bodyRows || []).map((row, rIndex) => {
-      const rowObj = { _rowIndex: rIndex + 2 };
-      (headerRow || []).forEach((_, cIndex) => {
-        rowObj[`col_${cIndex}`] = row[cIndex] ?? '';
-      });
-      return rowObj;
-    });
-
-    return { columns: cols, tableData: rows };
-  }, [sheetData]);
-
-  // Fast client-side global filtering
-  const filteredData = useMemo(() => {
-    if (!globalFilter.trim()) return tableData;
-    const query = globalFilter.toLowerCase();
-    return tableData.filter((row) =>
-      Object.entries(row).some(
-        ([key, val]) => key !== '_rowIndex' && String(val).toLowerCase().includes(query)
-      )
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rawRows;
+    const q = searchQuery.toLowerCase();
+    return rawRows.filter((row) =>
+      row.some((cell) => String(cell || '').toLowerCase().includes(q))
     );
-  }, [tableData, globalFilter]);
+  }, [rawRows, searchQuery]);
 
-  const table = useReactTable({
-    data: filteredData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  });
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPageRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [filteredRows, page, pageSize]);
 
-  // Cell Update logic
   const handleSaveCell = async () => {
     if (!editingCell || !accessToken) return;
     const { cellA1, value, sheetRow, colIndex } = editingCell;
     setStatusMessage(`Saving ${cellA1}...`);
 
-    const previousData = [...sheetData];
+    const previous = [...sheetData];
     const updated = sheetData.map((row) => [...row]);
     if (updated[sheetRow - 1]) {
       updated[sheetRow - 1][colIndex] = value;
@@ -175,19 +106,14 @@ export default function App() {
       setStatusMessage(`Saved ${cellA1}!`);
       setEditingCell(null);
     } catch (err) {
-      setSheetData(previousData);
+      setSheetData(previous);
       setStatusMessage(`Save failed: ${err.message}`);
     }
   };
 
-  // Slice rows for the current page
-  const pageStart = pagination.pageIndex * pagination.pageSize;
-  const pagedRows = table.getRowModel().rows.slice(pageStart, pageStart + pagination.pageSize);
-  const totalPages = Math.max(1, Math.ceil(filteredData.length / pagination.pageSize));
-
   return (
     <div style={{ padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h2 style={{ margin: '0 0 16px 0' }}>DCR Sheet Manager</h2>
+      <h2 style={{ margin: '0 0 16px 0' }}>DCR Operations Dashboard</h2>
 
       {/* Control Bar */}
       <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -205,8 +131,8 @@ export default function App() {
               onChange={(e) => setTabName(e.target.value)}
               style={{ padding: '7px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
             >
-              <option value="QC Responses">QC Responses</option>
               <option value="Cable Replacement">Cable Replacement</option>
+              <option value="QC Responses">QC Responses</option>
               <option value="Pole Transfers Form">Pole Transfers Form</option>
               <option value="Do's & Don'ts">Do's & Don'ts</option>
             </select>
@@ -219,11 +145,11 @@ export default function App() {
             </button>
             <input
               type="text"
-              placeholder="Search across all rows..."
-              value={globalFilter}
+              placeholder="Search all records..."
+              value={searchQuery}
               onChange={(e) => {
-                setGlobalFilter(e.target.value);
-                setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+                setSearchQuery(e.target.value);
+                setPage(1);
               }}
               style={{ padding: '7px 12px', minWidth: '260px', borderRadius: '4px', border: '1px solid #ccc' }}
             />
@@ -231,14 +157,13 @@ export default function App() {
         )}
       </div>
 
-      {/* Status banner */}
       {statusMessage && (
         <div style={{ padding: '8px 14px', background: '#f8f9fa', borderLeft: '4px solid #1a73e8', marginBottom: '14px', fontSize: '14px' }}>
           {statusMessage}
         </div>
       )}
 
-      {/* Cell Editor Bar */}
+      {/* Inline Editor */}
       {editingCell && (
         <div style={{ marginBottom: '14px', padding: '12px', background: '#e8f0fe', border: '1px solid #d2e3fc', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span>Editing <strong>{editingCell.cellA1}</strong>:</span>
@@ -254,62 +179,101 @@ export default function App() {
             style={{ padding: '6px 10px', minWidth: '280px', borderRadius: '4px', border: '1px solid #aaa' }}
           />
           <button onClick={handleSaveCell} style={{ padding: '6px 12px', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            Save (Enter)
+            Save
           </button>
           <button onClick={() => setEditingCell(null)} style={{ padding: '6px 12px', background: '#e0e0e0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            Cancel (Esc)
+            Cancel
           </button>
         </div>
       )}
 
-      {/* Grid Layout */}
-      {pagedRows.length > 0 && (
+      {/* Grid */}
+      {currentPageRows.length > 0 && (
         <>
           <div style={{ overflowX: 'auto', border: '1px solid #ddd', maxHeight: '68vh', background: '#fff' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '13px' }}>
               <thead style={{ position: 'sticky', top: 0, background: '#f1f3f4', zIndex: 2 }}>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <tr key={headerGroup.id}>
-                    <th style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', textAlign: 'center', width: '40px' }}>
-                      #
+                <tr>
+                  <th style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', width: '40px' }}>#</th>
+                  {headers.map((h, i) => (
+                    <th key={i} style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', textAlign: 'left', whiteSpace: 'nowrap' }}>
+                      {h || `Col ${colIndexToA1(i)}`}
                     </th>
-                    {headerGroup.headers.map((header) => (
-                      <th
-                        key={header.id}
-                        style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', textAlign: 'left', whiteSpace: 'nowrap' }}
-                      >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                      </th>
-                    ))}
-                  </tr>
-                ))}
+                  ))}
+                </tr>
               </thead>
               <tbody>
-                {pagedRows.map((row, rIdx) => {
-                  const sheetRow = row.original._rowIndex;
+                {currentPageRows.map((row, rIdx) => {
+                  const originalRowIndex = rawRows.indexOf(row) + 2;
                   return (
-                    <tr key={row.id} style={{ borderBottom: '1px solid #eee', background: rIdx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                    <tr key={rIdx} style={{ borderBottom: '1px solid #eee', background: rIdx % 2 === 0 ? '#fff' : '#fafafa' }}>
                       <td style={{ borderRight: '1px solid #eee', padding: '6px 10px', color: '#888', textAlign: 'center', fontSize: '11px' }}>
-                        {sheetRow}
+                        {originalRowIndex}
                       </td>
-                      {row.getVisibleCells().map((cell, cIdx) => {
-                        const cellA1 = `${colIndexToA1(cIdx)}${sheetRow}`;
-                        const rawVal = row.original[`col_${cIdx}`] ?? '';
+                      {headers.map((_, cIdx) => {
+                        const cellValue = row[cIdx] ?? '';
+                        const cellA1 = `${colIndexToA1(cIdx)}${originalRowIndex}`;
+                        const isColY = cIdx === 24; // Column Y (DCR ID)
+                        const driveIds = extractDriveFileIds(cellValue);
+
+                        // If Column Y in Cable Replacement, link directly to /dcr/:id
+                        if (isColY && tabName === 'Cable Replacement' && cellValue) {
+                          return (
+                            <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                              <button
+                                onClick={() => navigate(`/dcr/${encodeURIComponent(cellValue)}`)}
+                                style={{
+                                  background: '#e8f0fe',
+                                  color: '#1a73e8',
+                                  border: '1px solid #1a73e8',
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 'bold',
+                                }}
+                                title="Open Manager Review Page"
+                              >
+                                {cellValue} ↗
+                              </button>
+                            </td>
+                          );
+                        }
+
+                        // Drive Photo Preview Button
+                        if (driveIds.length > 0) {
+                          return (
+                            <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                {driveIds.map((id, pIdx) => (
+                                  <button
+                                    key={id}
+                                    onClick={() => setPreviewPhotoId(id)}
+                                    style={{
+                                      padding: '2px 6px',
+                                      fontSize: '11px',
+                                      borderRadius: '12px',
+                                      background: '#e8f0fe',
+                                      color: '#1a73e8',
+                                      border: '1px solid #1a73e8',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    📷 Photo {pIdx + 1}
+                                  </button>
+                                ))}
+                              </div>
+                            </td>
+                          );
+                        }
+
                         return (
                           <td
-                            key={cell.id}
-                            onClick={() =>
-                              setEditingCell({
-                                cellA1,
-                                value: rawVal,
-                                sheetRow,
-                                colIndex: cIdx,
-                              })
-                            }
+                            key={cIdx}
+                            onClick={() => setEditingCell({ cellA1, value: cellValue, sheetRow: originalRowIndex, colIndex: cIdx })}
                             style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap', cursor: 'pointer' }}
                             title={`Click to edit ${cellA1}`}
                           >
-                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            {cellValue}
                           </td>
                         );
                       })}
@@ -320,32 +284,25 @@ export default function App() {
             </table>
           </div>
 
-          {/* Pagination Controls */}
+          {/* Pagination */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
             <div>
-              Showing {pageStart + 1}–{Math.min(pageStart + pagination.pageSize, filteredData.length)} of {filteredData.length} rows
+              Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button
-                onClick={() => setPagination((prev) => ({ ...prev, pageIndex: Math.max(0, prev.pageIndex - 1) }))}
-                disabled={pagination.pageIndex === 0}
-                style={{ padding: '5px 12px' }}
-              >
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: '5px 12px' }}>
                 Previous
               </button>
-              <span>
-                Page <strong>{pagination.pageIndex + 1}</strong> of {totalPages}
-              </span>
-              <button
-                onClick={() => setPagination((prev) => ({ ...prev, pageIndex: Math.min(totalPages - 1, prev.pageIndex + 1) }))}
-                disabled={pagination.pageIndex >= totalPages - 1}
-                style={{ padding: '5px 12px' }}
-              >
+              <span>Page <strong>{page}</strong> of {totalPages}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={{ padding: '5px 12px' }}>
                 Next
               </button>
               <select
-                value={pagination.pageSize}
-                onChange={(e) => setPagination({ pageIndex: 0, pageSize: Number(e.target.value) })}
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setPage(1);
+                }}
                 style={{ marginLeft: '10px', padding: '4px' }}
               >
                 <option value={25}>Show 25</option>
@@ -357,7 +314,7 @@ export default function App() {
         </>
       )}
 
-      {/* Photo Preview Modal */}
+      {/* Drive Photo Modal */}
       {previewPhotoId && (
         <div
           onClick={() => setPreviewPhotoId(null)}
@@ -369,57 +326,23 @@ export default function App() {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
-            padding: '20px',
           }}
         >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: '#fff',
-              padding: '16px',
-              borderRadius: '8px',
-              maxWidth: '90vw',
-              maxHeight: '90vh',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '12px' }}>
-              <a
-                href={`https://drive.google.com/file/d/${previewPhotoId}/view`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: '#1a73e8', textDecoration: 'none', fontWeight: 'bold' }}
-              >
-                Open Original in Google Drive ↗
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: '16px', borderRadius: '8px', maxWidth: '90vw' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <a href={`https://drive.google.com/file/d/${previewPhotoId}/view`} target="_blank" rel="noreferrer" style={{ color: '#1a73e8', fontWeight: 'bold' }}>
+                Open Original in Drive ↗
               </a>
-              <button
-                onClick={() => setPreviewPhotoId(null)}
-                style={{
-                  border: 'none',
-                  background: 'none',
-                  fontSize: '18px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                }}
-              >
-                ✕ Close
+              <button onClick={() => setPreviewPhotoId(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }}>
+                ✕
               </button>
             </div>
             <img
               src={`https://drive.google.com/thumbnail?id=${previewPhotoId}&sz=w1200`}
-              alt="Inspection Upload Preview"
-              style={{
-                maxWidth: '100%',
-                maxHeight: '75vh',
-                objectFit: 'contain',
-                borderRadius: '4px',
-              }}
+              alt="Preview"
+              style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }}
               onError={(e) => {
                 e.target.onerror = null;
-                // Fallback direct webContent link if thumbnail endpoint encounters restricted file types
                 e.target.src = `https://drive.google.com/uc?export=view&id=${previewPhotoId}`;
               }}
             />
@@ -427,5 +350,18 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  const [accessToken, setAccessToken] = useState(null);
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<MainDashboard accessToken={accessToken} setAccessToken={setAccessToken} />} />
+        <Route path="/dcr/:dcrId" element={<DCRReview accessToken={accessToken} />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
