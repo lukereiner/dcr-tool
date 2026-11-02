@@ -355,12 +355,56 @@ function MainDashboard({ accessToken, setAccessToken }) {
 
 export default function App() {
   const [accessToken, setAccessToken] = useState(null);
+  
+  // Persisted state across page navigation
+  const [tabName, setTabName] = useState('Cable Replacement');
+  const [sheetData, setSheetData] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<MainDashboard accessToken={accessToken} setAccessToken={setAccessToken} />} />
-        <Route path="/dcr/:dcrId" element={<DCRReview accessToken={accessToken} />} />
+        <Route
+          path="/"
+          element={
+            <MainDashboard
+              accessToken={accessToken}
+              setAccessToken={setAccessToken}
+              tabName={tabName}
+              setTabName={setTabName}
+              sheetData={sheetData}
+              setSheetData={setSheetData}
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              page={page}
+              setPage={setPage}
+              pageSize={pageSize}
+              setPageSize={setPageSize}
+            />
+          }
+        />
+        <Route
+          path="/dcr/:dcrId"
+          element={
+            <DCRReview
+              accessToken={accessToken}
+              onRecordUpdated={(updatedRowNumber, colIndex, newValue) => {
+                // Update local parent state immediately when an edit occurs in DCRReview
+                setSheetData((prev) => {
+                  if (!prev || prev.length < updatedRowNumber) return prev;
+                  const next = prev.map((r) => [...r]);
+                  if (next[updatedRowNumber - 1]) {
+                    next[updatedRowNumber - 1][colIndex] = newValue;
+                  }
+                  return next;
+                });
+              }}
+            />
+          }
+        />
       </Routes>
     </BrowserRouter>
   );
