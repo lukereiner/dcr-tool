@@ -1,7 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useEffect, createContext, useContext } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import DCRReview from './components/DCRReview';
+
+
+export const AuthContext = createContext(null);
+
 
 function colIndexToA1(index) {
   let letter = '';
@@ -13,33 +17,97 @@ function colIndexToA1(index) {
   return letter;
 }
 
+
 function extractDriveFileIds(text) {
   if (!text || typeof text !== 'string') return [];
   const matches = [...text.matchAll(/(?:id=|\/d\/)([a-zA-Z0-9_-]{25,})/g)];
   return matches.map((m) => m[1]);
 }
 
-function MainDashboard({ accessToken, setAccessToken }) {
+
+// ---------------------------------------------------------------------------
+// Login Gateway Component
+// ---------------------------------------------------------------------------
+function LoginView({ onLoginSuccess, sessionExpired }) {
+  const login = useGoogleLogin({
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    onSuccess: (tokenResponse) => {
+      // Google tokens expire in ~3600 seconds. Buffer by 5 minutes.
+      const expiresInMs = (tokenResponse.expires_in || 3600) * 1000 - 300000;
+      const expiryTimestamp = Date.now() + expiresInMs;
+      
+      sessionStorage.setItem('dcr_access_token', tokenResponse.access_token);
+      sessionStorage.setItem('dcr_token_expiry', String(expiryTimestamp));
+      onLoginSuccess(tokenResponse.access_token);
+    },
+    onError: (err) => {
+      console.error('Google Sign-in failed', err);
+    },
+  });
+
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ padding: '32px 40px', background: '#fff', border: '1px solid #ddd', borderRadius: '8px', textAlign: 'center', maxWidth: '420px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+        <h2 style={{ margin: '0 0 12px 0' }}>DCR Tool Portal</h2>
+        <p style={{ color: '#666', fontSize: '14px', marginBottom: '24px' }}>
+          Sign in with your authorized Google account to review and manage tracking operations.
+        </p>
+
+
+        {sessionExpired && (
+          <div style={{ padding: '10px 14px', background: '#fdf3f2', border: '1px solid #f5c6cb', color: '#721c24', borderRadius: '4px', marginBottom: '20px', fontSize: '13px' }}>
+            Your session has expired. Please sign in again to continue.
+          </div>
+        )}
+
+
+        <button
+          onClick={() => login()}
+          style={{
+            padding: '12px 24px',
+            background: '#1a73e8',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '15px',
+            fontWeight: 500,
+            width: '100%',
+          }}
+        >
+          Sign in with Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Main Dashboard Table Component
+// ---------------------------------------------------------------------------
+function MainDashboard({
+  tabName,
+  setTabName,
+  sheetData,
+  setSheetData,
+  searchQuery,
+  setSearchQuery,
+  page,
+  setPage,
+  pageSize,
+  setPageSize,
+}) {
   const navigate = useNavigate();
-  const [tabName, setTabName] = useState('Cable Replacement');
-  const [sheetData, setSheetData] = useState([]);
+  const { accessToken, logout } = useContext(AuthContext);
+
+
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
   const [editingCell, setEditingCell] = useState(null);
   const [previewPhotoId, setPreviewPhotoId] = useState(null);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-
-  const login = useGoogleLogin({
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
-    onSuccess: (token) => {
-      setAccessToken(token.access_token);
-      setStatusMessage('Signed in successfully.');
-    },
-    onError: () => setStatusMessage('Google sign-in failed.'),
-  });
 
   const fetchSheet = async () => {
     if (!accessToken) return;
@@ -49,8 +117,17 @@ function MainDashboard({ accessToken, setAccessToken }) {
       const res = await fetch(`/api/sheet?tab=${encodeURIComponent(tabName)}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+
+
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
+
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
+
 
       setSheetData(data.values || []);
       setPage(1);
@@ -62,8 +139,18 @@ function MainDashboard({ accessToken, setAccessToken }) {
     }
   };
 
+
+  // Auto-fetch table if empty on mount
+  useEffect(() => {
+    if (accessToken && sheetData.length === 0) {
+      fetchSheet();
+    }
+  }, [tabName]);
+
+
   const headers = useMemo(() => sheetData[0] || [], [sheetData]);
   const rawRows = useMemo(() => sheetData.slice(1) || [], [sheetData]);
+
 
   const filteredRows = useMemo(() => {
     if (!searchQuery.trim()) return rawRows;
@@ -73,16 +160,19 @@ function MainDashboard({ accessToken, setAccessToken }) {
     );
   }, [rawRows, searchQuery]);
 
+
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
 
+
   const handleSaveCell = async () => {
     if (!editingCell || !accessToken) return;
     const { cellA1, value, sheetRow, colIndex } = editingCell;
     setStatusMessage(`Saving ${cellA1}...`);
+
 
     const previous = [...sheetData];
     const updated = sheetData.map((row) => [...row]);
@@ -90,6 +180,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
       updated[sheetRow - 1][colIndex] = value;
       setSheetData(updated);
     }
+
 
     try {
       const res = await fetch('/api/sheet/cell', {
@@ -100,8 +191,17 @@ function MainDashboard({ accessToken, setAccessToken }) {
         },
         body: JSON.stringify({ tabName, cell: cellA1, value }),
       });
+
+
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
+
+
       const result = await res.json();
       if (!res.ok) throw new Error(result.error);
+
 
       setStatusMessage(`Saved ${cellA1}!`);
       setEditingCell(null);
@@ -111,51 +211,50 @@ function MainDashboard({ accessToken, setAccessToken }) {
     }
   };
 
+
   return (
     <div style={{ padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <h2 style={{ margin: '0 0 16px 0' }}>DCR Operations Dashboard</h2>
-
-      {/* Control Bar */}
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {!accessToken ? (
-          <button
-            onClick={() => login()}
-            style={{ padding: '10px 18px', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
-          >
-            Sign in with Google
-          </button>
-        ) : (
-          <>
-            <select
-              value={tabName}
-              onChange={(e) => setTabName(e.target.value)}
-              style={{ padding: '7px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
-            >
-              <option value="Cable Replacement">Cable Replacement</option>
-              <option value="QC Responses">QC Responses</option>
-              <option value="Pole Transfers Form">Pole Transfers Form</option>
-              <option value="Do's & Don'ts">Do's & Don'ts</option>
-            </select>
-            <button
-              onClick={fetchSheet}
-              disabled={loading}
-              style={{ padding: '7px 16px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-              {loading ? 'Fetching...' : 'Load Sheet'}
-            </button>
-            <input
-              type="text"
-              placeholder="Search all records..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setPage(1);
-              }}
-              style={{ padding: '7px 12px', minWidth: '260px', borderRadius: '4px', border: '1px solid #ccc' }}
-            />
-          </>
-        )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <h2 style={{ margin: 0 }}>DCR Operations Dashboard</h2>
+        <button
+          onClick={() => logout(false)}
+          style={{ padding: '6px 12px', background: '#f1f3f4', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          Sign Out
+        </button>
       </div>
+
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <select
+          value={tabName}
+          onChange={(e) => setTabName(e.target.value)}
+          style={{ padding: '7px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
+        >
+          <option value="Cable Replacement">Cable Replacement</option>
+          <option value="QC Responses">QC Responses</option>
+          <option value="Pole Transfers Form">Pole Transfers Form</option>
+          <option value="Do's & Don'ts">Do's & Don'ts</option>
+        </select>
+        <button
+          onClick={fetchSheet}
+          disabled={loading}
+          style={{ padding: '7px 16px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          {loading ? 'Fetching...' : 'Reload Tab'}
+        </button>
+        <input
+          type="text"
+          placeholder="Search all records..."
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setPage(1);
+          }}
+          style={{ padding: '7px 12px', minWidth: '260px', borderRadius: '4px', border: '1px solid #ccc' }}
+        />
+      </div>
+
 
       {statusMessage && (
         <div style={{ padding: '8px 14px', background: '#f8f9fa', borderLeft: '4px solid #1a73e8', marginBottom: '14px', fontSize: '14px' }}>
@@ -163,7 +262,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
         </div>
       )}
 
-      {/* Inline Editor */}
+
       {editingCell && (
         <div style={{ marginBottom: '14px', padding: '12px', background: '#e8f0fe', border: '1px solid #d2e3fc', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span>Editing <strong>{editingCell.cellA1}</strong>:</span>
@@ -187,7 +286,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
         </div>
       )}
 
-      {/* Grid */}
+
       {currentPageRows.length > 0 && (
         <>
           <div style={{ overflowX: 'auto', border: '1px solid #ddd', maxHeight: '68vh', background: '#fff' }}>
@@ -213,10 +312,10 @@ function MainDashboard({ accessToken, setAccessToken }) {
                       {headers.map((_, cIdx) => {
                         const cellValue = row[cIdx] ?? '';
                         const cellA1 = `${colIndexToA1(cIdx)}${originalRowIndex}`;
-                        const isColY = cIdx === 24; // Column Y (DCR ID)
+                        const isColY = cIdx === 24;
                         const driveIds = extractDriveFileIds(cellValue);
 
-                        // If Column Y in Cable Replacement, link directly to /dcr/:id
+
                         if (isColY && tabName === 'Cable Replacement' && cellValue) {
                           return (
                             <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
@@ -231,7 +330,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
                                   cursor: 'pointer',
                                   fontWeight: 'bold',
                                 }}
-                                title="Open Manager Review Page"
+                                title="Open Review Page"
                               >
                                 {cellValue} ↗
                               </button>
@@ -239,7 +338,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
                           );
                         }
 
-                        // Drive Photo Preview Button
+
                         if (driveIds.length > 0) {
                           return (
                             <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
@@ -266,6 +365,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
                           );
                         }
 
+
                         return (
                           <td
                             key={cIdx}
@@ -284,7 +384,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
             </table>
           </div>
 
-          {/* Pagination */}
+
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
             <div>
               Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
@@ -314,7 +414,7 @@ function MainDashboard({ accessToken, setAccessToken }) {
         </>
       )}
 
-      {/* Drive Photo Modal */}
+
       {previewPhotoId && (
         <div
           onClick={() => setPreviewPhotoId(null)}
@@ -353,10 +453,27 @@ function MainDashboard({ accessToken, setAccessToken }) {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Root App with Session Validation & Routing
+// ---------------------------------------------------------------------------
 export default function App() {
-  const [accessToken, setAccessToken] = useState(null);
-  
-  // Persisted state across page navigation
+  const [accessToken, setAccessToken] = useState(() => {
+    const token = sessionStorage.getItem('dcr_access_token');
+    const expiry = Number(sessionStorage.getItem('dcr_token_expiry') || 0);
+    if (token && expiry && Date.now() < expiry) {
+      return token;
+    }
+    sessionStorage.removeItem('dcr_access_token');
+    sessionStorage.removeItem('dcr_token_expiry');
+    return null;
+  });
+
+
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+
+  // Table state kept in memory across navigations
   const [tabName, setTabName] = useState('Cable Replacement');
   const [sheetData, setSheetData] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -364,48 +481,64 @@ export default function App() {
   const [pageSize, setPageSize] = useState(50);
 
 
+  const logout = (dueToExpiry = false) => {
+    sessionStorage.removeItem('dcr_access_token');
+    sessionStorage.removeItem('dcr_token_expiry');
+    setAccessToken(null);
+    setSessionExpired(dueToExpiry);
+  };
+
+
+  const handleLoginSuccess = (token) => {
+    setAccessToken(token);
+    setSessionExpired(false);
+  };
+
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <MainDashboard
-              accessToken={accessToken}
-              setAccessToken={setAccessToken}
-              tabName={tabName}
-              setTabName={setTabName}
-              sheetData={sheetData}
-              setSheetData={setSheetData}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              page={page}
-              setPage={setPage}
-              pageSize={pageSize}
-              setPageSize={setPageSize}
+    <AuthContext.Provider value={{ accessToken, logout }}>
+      <BrowserRouter>
+        {!accessToken ? (
+          <LoginView onLoginSuccess={handleLoginSuccess} sessionExpired={sessionExpired} />
+        ) : (
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <MainDashboard
+                  tabName={tabName}
+                  setTabName={setTabName}
+                  sheetData={sheetData}
+                  setSheetData={setSheetData}
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  page={page}
+                  setPage={setPage}
+                  pageSize={pageSize}
+                  setPageSize={setPageSize}
+                />
+              }
             />
-          }
-        />
-        <Route
-          path="/dcr/:dcrId"
-          element={
-            <DCRReview
-              accessToken={accessToken}
-              onRecordUpdated={(updatedRowNumber, colIndex, newValue) => {
-                // Update local parent state immediately when an edit occurs in DCRReview
-                setSheetData((prev) => {
-                  if (!prev || prev.length < updatedRowNumber) return prev;
-                  const next = prev.map((r) => [...r]);
-                  if (next[updatedRowNumber - 1]) {
-                    next[updatedRowNumber - 1][colIndex] = newValue;
-                  }
-                  return next;
-                });
-              }}
+            <Route
+              path="/dcr/:dcrId"
+              element={
+                <DCRReview
+                  onRecordUpdated={(sheetRowNumber, colIndex, newValue) => {
+                    setSheetData((prev) => {
+                      if (!prev || prev.length < sheetRowNumber) return prev;
+                      const next = prev.map((r) => [...r]);
+                      if (next[sheetRowNumber - 1]) {
+                        next[sheetRowNumber - 1][colIndex] = newValue;
+                      }
+                      return next;
+                    });
+                  }}
+                />
+              }
             />
-          }
-        />
-      </Routes>
-    </BrowserRouter>
+          </Routes>
+        )}
+      </BrowserRouter>
+    </AuthContext.Provider>
   );
 }
