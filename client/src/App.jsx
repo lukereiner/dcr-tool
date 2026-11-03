@@ -18,7 +18,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
 
 
   const login = useGoogleLogin({
-    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly',
     prompt: 'select_account',
     onSuccess: (tokenResponse) => {
       setLoginError('');

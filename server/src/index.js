@@ -34,6 +34,17 @@ const getSheetsClient = (authHeader) => {
   return google.sheets({ version: "v4", auth: oauth2Client });
 };
 
+// Helper: initialize Google Drive API using the logged-in user's token
+const getDriveClient = (authHeader) => {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing or malformed Authorization header');
+  }
+  const token = authHeader.split(' ')[1];
+  const oauth2Client = new google.auth.OAuth2();
+  oauth2Client.setCredentials({ access_token: token });
+  return google.drive({ version: 'v3', auth: oauth2Client });
+};
+
 // Helper: Convert column index to A1 letter (0 -> A, 1 -> B, 26 -> AA, etc.)
 function getColLetter(index) {
   let letter = "";
@@ -333,7 +344,75 @@ app.post("/api/dcr/:dcrId/cell", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Static Asset Serving (Production & Render Compatibility)
+// 3. Google Drive Endpoint for photos from Google Forms
+// ---------------------------------------------------------------------------
+// GET: Fetch all image files inside a Google Drive Folder
+app.get('/api/drive/folder/:folderId/images', async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const drive = getDriveClient(req.headers.authorization);
+
+
+    // List image files within this parent folder (exclude trashed files)
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`,
+      fields: 'files(id, name, mimeType, webViewLink, thumbnailLink)',
+      pageSize: 50,
+      orderBy: 'name',
+    });
+
+
+    const files = response.data.files || [];
+    res.json({ files });
+  } catch (error) {
+    console.error('Error listing folder files:', error?.response?.data || error.message);
+    const status = error?.response?.status || 500;
+    res.status(status).json({
+      error: error?.response?.data?.error?.message || error.message,
+    });
+  }
+});
+
+// GET: Stream a Drive image using OAuth credentials
+app.get('/api/drive/file/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const token = req.query.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+
+
+    if (!token) {
+      return res.status(401).send('Missing authorization token');
+    }
+
+
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: token });
+    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+
+
+    // Stream image binary from Google Drive
+    const response = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'stream' }
+    );
+
+
+    // Forward mime-type and cache in browser for 24 hours
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
+    }
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+
+
+    response.data.pipe(res);
+  } catch (error) {
+    console.error('Error streaming drive file:', error?.response?.data || error.message);
+    res.status(500).send('Failed to stream image');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 4. Static Asset Serving (Production & Render Compatibility)
 // ---------------------------------------------------------------------------
 if (process.env.NODE_ENV === "production") {
   const clientDistPath = path.join(__dirname, "../../client/dist");
