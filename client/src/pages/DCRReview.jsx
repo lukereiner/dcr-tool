@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../App';
 
@@ -6,7 +6,7 @@ import { AuthContext } from '../App';
 export default function DCRReview({ onRecordUpdated }) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
-  const { accessToken, logout } = useContext(AuthContext);
+  const { accessToken, logout, refreshSignal } = useContext(AuthContext);
 
 
   const [dcrData, setDcrData] = useState(null);
@@ -16,46 +16,54 @@ export default function DCRReview({ onRecordUpdated }) {
   const [savingField, setSavingField] = useState(null);
 
 
-  useEffect(() => {
+  const loadDcr = async (force = false) => {
     if (!accessToken) return;
+    setLoading(true);
+    setStatusMessage(`Loading DCR #${dcrId}...`);
+    try {
+      const url = `/api/dcr/${encodeURIComponent(dcrId)}${force ? '?refresh=true' : ''}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
 
-    const loadDcr = async () => {
-      setLoading(true);
-      setStatusMessage(`Loading DCR #${dcrId}...`);
-      try {
-        const res = await fetch(`/api/dcr/${encodeURIComponent(dcrId)}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-
-        if (res.status === 401) {
-          logout(true);
-          return;
-        }
-
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-
-
-        setDcrData(data);
-        const initialInputs = {};
-        data.fields.forEach((f) => {
-          initialInputs[f.colLetter] = f.value;
-        });
-        setFormValues(initialInputs);
-        setStatusMessage('');
-      } catch (err) {
-        setStatusMessage(`Error: ${err.message}`);
-      } finally {
-        setLoading(false);
+      if (res.status === 401) {
+        logout(true);
+        return;
       }
-    };
 
 
-    loadDcr();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+
+      setDcrData(data);
+      const initialInputs = {};
+      data.fields.forEach((f) => {
+        initialInputs[f.colLetter] = f.value;
+      });
+      setFormValues(initialInputs);
+      setStatusMessage(force ? 'DCR record refreshed from Google Sheets.' : '');
+    } catch (err) {
+      setStatusMessage(`Error: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  // Fetch on mount or whenever dcrId changes
+  useEffect(() => {
+    loadDcr(false);
   }, [dcrId, accessToken]);
+
+
+  // Re-fetch with force=true whenever the global Refresh button is clicked
+  useEffect(() => {
+    if (refreshSignal > 0) {
+      loadDcr(true);
+    }
+  }, [refreshSignal]);
 
 
   const handleSaveField = async (colLetter, colHeader, colIndex) => {

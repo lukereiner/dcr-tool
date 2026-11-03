@@ -105,7 +105,7 @@ function NavigationBar({ onRefresh, loading, remainingQuota, onLogout }) {
       <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '64px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
           <div style={{ fontWeight: 700, fontSize: '18px', color: '#1a73e8' }}>
-            OHIO | F27 Tracking[cite: 1]
+            OHIO | Project Tracker
           </div>
 
 
@@ -199,6 +199,7 @@ export default function App() {
     setSessionExpired(false);
   };
 
+  const [refreshSignal, setRefreshSignal] = useState(0);
 
 const fetchSheet = async (forceRefresh = false) => {
   if (!accessToken) return;
@@ -232,6 +233,16 @@ const fetchSheet = async (forceRefresh = false) => {
   }
 };
 
+  // Unified refresh handler
+const handleGlobalRefresh = (forceRefresh = true) => {
+  if (location.pathname.startsWith('/dcr/')) {
+    // Increment the signal to inform the active DCRReview component
+    setRefreshSignal((prev) => prev + 1);
+  }
+  // Also refresh the background sheetData
+  fetchSheet(forceRefresh);
+};
+
 
   useEffect(() => {
     if (accessToken && sheetData.length === 0) {
@@ -253,16 +264,15 @@ const fetchSheet = async (forceRefresh = false) => {
 
 
   return (
-    <AuthContext.Provider value={{ accessToken, logout }}>
+    <AuthContext.Provider value={{ accessToken, logout, refreshSignal }}>
       <BrowserRouter>
         {!accessToken ? (
           <LoginView onLoginSuccess={handleLoginSuccess} sessionExpired={sessionExpired} />
         ) : (
           <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
             <NavigationBar
-              onRefresh={fetchSheet}
+              onRefresh={handleGlobalRefresh}
               loading={loading}
-              remainingQuota={remainingQuota}
               onLogout={() => logout(false)}
             />
 
