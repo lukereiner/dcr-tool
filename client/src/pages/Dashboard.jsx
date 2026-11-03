@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useToast } from "../context/ToastContext";
 
 const STATUS_OPTIONS = [
   "Pre Construction",
@@ -27,17 +28,15 @@ export default function Dashboard({
   onStatusUpdated,
 }) {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [selectedStatus, setSelectedStatus] = useState("Under Construction");
   const [updatingRow, setUpdatingRow] = useState(null);
-  const [statusMessage, setStatusMessage] = useState("");
 
-  // Extract body rows
   const rows = useMemo(() => {
     if (!sheetData || sheetData.length < 2) return [];
     return sheetData.slice(1);
   }, [sheetData]);
 
-  // Compute High-Level KPIs
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -70,41 +69,32 @@ export default function Dashboard({
     };
   }, [rows]);
 
-// Filter and sort the latest 5 rows matching the selected status
-const filteredRows = useMemo(() => {
-  const matches = [];
+  const filteredRows = useMemo(() => {
+    const matches = [];
 
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const status = String(row[32] || "").trim();
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const status = String(row[32] || '').trim(); // Col AG
-
-
-    if (status.toLowerCase() === selectedStatus.toLowerCase()) {
-      matches.push({
-        row,
-        sheetRowNumber: i + 2, // 1-based index in Google Sheets
-      });
+      if (status.toLowerCase() === selectedStatus.toLowerCase()) {
+        matches.push({
+          row,
+          sheetRowNumber: i + 2,
+        });
+      }
     }
-  }
 
+    matches.sort((a, b) => {
+      const dateA = new Date(a.row[2] || 0);
+      const dateB = new Date(b.row[2] || 0);
+      return dateB - dateA;
+    });
 
-  // Sort descending by Date Submitted (Column C / index 2)
-  matches.sort((a, b) => {
-    const dateA = new Date(a.row[2] || 0);
-    const dateB = new Date(b.row[2] || 0);
-    return dateB - dateA; // Most recent dates first
-  });
+    return matches.slice(0, 10);
+  }, [rows, selectedStatus]);
 
-
-  // Limit to top 10 most recent records
-  return matches.slice(0, 10);
-}, [rows, selectedStatus]);
-
-  // Inline Status update for Column AG
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
     setUpdatingRow(sheetRowNumber);
-    setStatusMessage(`Updating row ${sheetRowNumber} to "${newStatus}"...`);
 
     try {
       const res = await fetch("/api/sheet/cell", {
@@ -123,14 +113,15 @@ const filteredRows = useMemo(() => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      setStatusMessage(
-        `Row ${sheetRowNumber} status updated to "${newStatus}".`,
+      showToast(
+        `Row ${sheetRowNumber} status updated to "${newStatus}"`,
+        "success",
       );
       if (onStatusUpdated) {
         onStatusUpdated(sheetRowNumber, 32, newStatus);
       }
     } catch (err) {
-      setStatusMessage(`Failed to update status: ${err.message}`);
+      showToast(`Failed to update status: ${err.message}`, "error");
     } finally {
       setUpdatingRow(null);
     }
@@ -284,20 +275,6 @@ const filteredRows = useMemo(() => {
         </div>
       </div>
 
-      {statusMessage && (
-        <div
-          style={{
-            padding: "10px 14px",
-            background: "#f8f9fa",
-            borderLeft: "4px solid #1a73e8",
-            marginBottom: "16px",
-            fontSize: "13px",
-          }}
-        >
-          {statusMessage}
-        </div>
-      )}
-
       {/* 5-Row Section */}
       <div
         style={{
@@ -318,8 +295,6 @@ const filteredRows = useMemo(() => {
             gap: "12px",
           }}
         >
-
-          {/* Status Toggle Buttons */}
           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
             {STATUS_OPTIONS.map((status) => {
               const active = selectedStatus === status;
@@ -349,7 +324,6 @@ const filteredRows = useMemo(() => {
           </div>
         </div>
 
-        {/* 5-Row Table */}
         <div
           style={{
             overflowX: "auto",
@@ -456,12 +430,12 @@ const filteredRows = useMemo(() => {
                 </tr>
               ) : (
                 filteredRows.map(({ row, sheetRowNumber }) => {
-                  const dcrId = row[24] || "—"; // Col Y
-                  const dateSub = row[2] || "—"; // Col C
-                  const nodeNum = row[12] || "—"; // Col M
-                  const region = row[5] || "—"; // Col F
-                  const contractor = row[34] || "—"; // Col AI
-                  const currentStatus = String(row[32] || "").trim(); // Col AG
+                  const dcrId = row[24] || "—";
+                  const dateSub = row[2] || "—";
+                  const nodeNum = row[12] || "—";
+                  const region = row[5] || "—";
+                  const contractor = row[34] || "—";
+                  const currentStatus = String(row[32] || "").trim();
 
                   return (
                     <tr
@@ -499,7 +473,6 @@ const filteredRows = useMemo(() => {
                         {contractor}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
-                        {/* Inline Status Dropdown */}
                         <select
                           value={currentStatus}
                           disabled={updatingRow === sheetRowNumber}

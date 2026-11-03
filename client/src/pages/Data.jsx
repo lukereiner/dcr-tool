@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../App';
+import { useToast } from '../context/ToastContext';
 
 
 function colIndexToA1(index) {
@@ -37,14 +38,13 @@ export default function Data({
 }) {
   const navigate = useNavigate();
   const { accessToken, logout } = useContext(AuthContext);
+  const { showToast } = useToast();
 
 
-  const [statusMessage, setStatusMessage] = useState('');
   const [editingCell, setEditingCell] = useState(null);
   const [previewPhotoId, setPreviewPhotoId] = useState(null);
 
 
-  // Auto-fetch if sheetData is empty when landing directly on /data
   useEffect(() => {
     if (accessToken && (!sheetData || sheetData.length === 0)) {
       fetchSheet();
@@ -75,7 +75,6 @@ export default function Data({
   const handleSaveCell = async () => {
     if (!editingCell || !accessToken) return;
     const { cellA1, value, sheetRow, colIndex } = editingCell;
-    setStatusMessage(`Saving ${cellA1}...`);
 
 
     const previous = [...sheetData];
@@ -107,11 +106,11 @@ export default function Data({
       if (!res.ok) throw new Error(result.error);
 
 
-      setStatusMessage(`Saved ${cellA1}!`);
+      showToast(`Saved ${cellA1} successfully!`, 'success');
       setEditingCell(null);
     } catch (err) {
       setSheetData(previous);
-      setStatusMessage(`Save failed: ${err.message}`);
+      showToast(`Save failed: ${err.message}`, 'error');
     }
   };
 
@@ -134,7 +133,7 @@ export default function Data({
           <option value="Do's & Don'ts">Do's & Don'ts</option>
         </select>
         <button
-          onClick={fetchSheet}
+          onClick={() => fetchSheet(true)}
           disabled={loading}
           style={{ padding: '7px 16px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
         >
@@ -151,13 +150,6 @@ export default function Data({
           style={{ padding: '7px 12px', minWidth: '260px', borderRadius: '4px', border: '1px solid #ccc' }}
         />
       </div>
-
-
-      {statusMessage && (
-        <div style={{ padding: '8px 14px', background: '#f8f9fa', borderLeft: '4px solid #1a73e8', marginBottom: '14px', fontSize: '14px' }}>
-          {statusMessage}
-        </div>
-      )}
 
 
       {/* Inline Editor */}
@@ -283,7 +275,6 @@ export default function Data({
           </div>
 
 
-          {/* Pagination */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
             <div>
               Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows

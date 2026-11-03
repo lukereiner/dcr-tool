@@ -5,14 +5,13 @@ import Dashboard from './pages/Dashboard';
 import Data from './pages/Data';
 import DCRReview from './pages/DCRReview';
 import RefreshButton from './components/RefreshButton';
+import { ToastProvider, useToast } from './context/ToastContext';
 
 
 export const AuthContext = createContext(null);
 
 
-// ---------------------------------------------------------------------------
-// Login Gateway
-// ---------------------------------------------------------------------------
+// Login View
 function LoginView({ onLoginSuccess, sessionExpired }) {
   const [loginError, setLoginError] = useState('');
 
@@ -85,10 +84,8 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
 }
 
 
-// ---------------------------------------------------------------------------
-// Top Navigation Header
-// ---------------------------------------------------------------------------
-function NavigationBar({ onRefresh, loading, remainingQuota, onLogout }) {
+// Navigation Bar
+function NavigationBar({ onRefresh, loading, onLogout }) {
   const location = useLocation();
 
 
@@ -134,9 +131,8 @@ function NavigationBar({ onRefresh, loading, remainingQuota, onLogout }) {
         </div>
 
 
-        {/* Top Right Actions: Force Refresh + Sign Out */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <RefreshButton onRefresh={onRefresh} loading={loading} remainingQuota={remainingQuota} />
+          <RefreshButton onRefresh={onRefresh} loading={loading} />
           <button
             onClick={onLogout}
             style={{
@@ -158,10 +154,9 @@ function NavigationBar({ onRefresh, loading, remainingQuota, onLogout }) {
 }
 
 
-// ---------------------------------------------------------------------------
-// App Root
-// ---------------------------------------------------------------------------
-export default function App() {
+// Inner App with Global Routing
+function AppContent() {
+  const { showToast } = useToast();
   const [accessToken, setAccessToken] = useState(() => {
     const token = sessionStorage.getItem('dcr_access_token');
     const expiry = Number(sessionStorage.getItem('dcr_token_expiry') || 0);
@@ -178,7 +173,7 @@ export default function App() {
   const [tabName, setTabName] = useState('Cable Replacement');
   const [sheetData, setSheetData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [remainingQuota, setRemainingQuota] = useState(60);
+  const [refreshSignal, setRefreshSignal] = useState(0);
 
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,49 +194,39 @@ export default function App() {
     setSessionExpired(false);
   };
 
-  const [refreshSignal, setRefreshSignal] = useState(0);
 
-const fetchSheet = async (forceRefresh = false) => {
-  if (!accessToken) return;
-  setLoading(true);
-  try {
-    const isForce = forceRefresh === true;
-    const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${isForce ? '&refresh=true' : ''}`;
-    
-    console.log(`Requesting sheet data: ${url}`);
-    
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+  const fetchSheet = async (forceRefresh = false) => {
+    if (!accessToken) return;
+    setLoading(true);
+    try {
+      const isForce = forceRefresh === true;
+      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${isForce ? '&refresh=true' : ''}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
 
-    if (res.status === 401) {
-      logout(true);
-      return;
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
+
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+
+      setSheetData(data.values || []);
+      if (isForce) {
+        showToast(`Refreshed ${tabName} data successfully`, 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(`Fetch error: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
     }
-
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-
-
-    setSheetData(data.values || []);
-  } catch (err) {
-    console.error('Failed to fetch sheet:', err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // Unified refresh handler
-const handleGlobalRefresh = (forceRefresh = true) => {
-  if (location.pathname.startsWith('/dcr/')) {
-    // Increment the signal to inform the active DCRReview component
-    setRefreshSignal((prev) => prev + 1);
-  }
-  // Also refresh the background sheetData
-  fetchSheet(forceRefresh);
-};
+  };
 
 
   useEffect(() => {
@@ -249,6 +234,17 @@ const handleGlobalRefresh = (forceRefresh = true) => {
       fetchSheet(false);
     }
   }, [accessToken, tabName]);
+
+
+const handleGlobalRefresh = (forceRefresh = true) => {
+    if (window.location.pathname.startsWith('/dcr/')) {
+      // On DCR page: only signal DCRReview to refresh (which will update the server cache)
+      setRefreshSignal((prev) => prev + 1);
+    } else {
+      // On Dashboard or Sheet Data: refresh the main table data
+      fetchSheet(forceRefresh);
+    }
+  };
 
 
   const handleRecordUpdated = (sheetRowNumber, colIndex, newValue) => {
@@ -338,5 +334,14 @@ const handleGlobalRefresh = (forceRefresh = true) => {
         )}
       </BrowserRouter>
     </AuthContext.Provider>
+  );
+}
+
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }
