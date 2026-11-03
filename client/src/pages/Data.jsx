@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useContext } from 'react';
+import { useState, useMemo, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../App';
 import { useToast } from '../context/ToastContext';
@@ -116,29 +116,65 @@ export default function Data({
 
 
   return (
-    <div>
+    <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+      <style>{`
+        .sheet-table-row {
+          border-bottom: 1px solid var(--border-subtle);
+          transition: background-color 0.15s ease;
+        }
+        .sheet-table-row:nth-child(even) {
+          background-color: var(--bg-card);
+        }
+        .sheet-table-row:nth-child(odd) {
+          background-color: var(--bg-card-subtle);
+        }
+        .sheet-table-row:hover {
+          background-color: var(--bg-input);
+        }
+        .sheet-cell {
+          padding: 8px 12px;
+          border-right: 1px solid var(--border-subtle);
+          white-space: nowrap;
+          color: var(--text-main);
+          font-size: 13px;
+        }
+        .sheet-cell-editable {
+          cursor: pointer;
+        }
+        .sheet-cell-editable:hover {
+          outline: 1px dashed var(--btn-primary-bg);
+          outline-offset: -1px;
+        }
+      `}</style>
+
+
       {/* Control Bar */}
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
         <select
           value={tabName}
           onChange={(e) => {
             setTabName(e.target.value);
             setPage(1);
           }}
-          style={{ padding: '7px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
+          className="dcr-select"
+          style={{ minWidth: '180px' }}
         >
           <option value="Cable Replacement">Cable Replacement</option>
           <option value="QC Responses">QC Responses</option>
           <option value="Pole Transfers Form">Pole Transfers Form</option>
           <option value="Do's & Don'ts">Do's & Don'ts</option>
         </select>
+
+
         <button
           onClick={() => fetchSheet(true)}
           disabled={loading}
-          style={{ padding: '7px 16px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          className="btn-primary"
         >
           {loading ? 'Fetching...' : 'Reload Tab'}
         </button>
+
+
         <input
           type="text"
           placeholder="Search all records..."
@@ -147,15 +183,30 @@ export default function Data({
             setSearchQuery(e.target.value);
             setPage(1);
           }}
-          style={{ padding: '7px 12px', minWidth: '260px', borderRadius: '4px', border: '1px solid #ccc' }}
+          className="dcr-input"
+          style={{ minWidth: '280px', flex: '1 1 280px', maxWidth: '450px' }}
         />
       </div>
 
 
       {/* Inline Editor */}
       {editingCell && (
-        <div style={{ marginBottom: '14px', padding: '12px', background: '#e8f0fe', border: '1px solid #d2e3fc', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>Editing <strong>{editingCell.cellA1}</strong>:</span>
+        <div
+          style={{
+            marginBottom: '16px',
+            padding: '12px 16px',
+            background: 'var(--bg-card-subtle)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            boxShadow: 'var(--shadow-card)',
+          }}
+        >
+          <span style={{ fontSize: '13px', color: 'var(--text-main)' }}>
+            Editing <strong>{editingCell.cellA1}</strong>:
+          </span>
           <input
             type="text"
             value={editingCell.value}
@@ -165,28 +216,66 @@ export default function Data({
               if (e.key === 'Enter') handleSaveCell();
               if (e.key === 'Escape') setEditingCell(null);
             }}
-            style={{ padding: '6px 10px', minWidth: '280px', borderRadius: '4px', border: '1px solid #aaa' }}
+            className="dcr-input"
+            style={{ minWidth: '300px' }}
           />
-          <button onClick={handleSaveCell} style={{ padding: '6px 12px', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button onClick={handleSaveCell} className="btn-primary">
             Save
           </button>
-          <button onClick={() => setEditingCell(null)} style={{ padding: '6px 12px', background: '#e0e0e0', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button onClick={() => setEditingCell(null)} className="btn-secondary">
             Cancel
           </button>
         </div>
       )}
 
 
-      {/* Grid */}
+      {/* Grid Table */}
       {currentPageRows.length > 0 ? (
-        <>
-          <div style={{ overflowX: 'auto', border: '1px solid #ddd', maxHeight: '68vh', background: '#fff' }}>
+        <div
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            boxShadow: 'var(--shadow-card)',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ overflowX: 'auto', maxHeight: '70vh' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '13px' }}>
-              <thead style={{ position: 'sticky', top: 0, background: '#f1f3f4', zIndex: 2 }}>
+              <thead
+                style={{
+                  position: 'sticky',
+                  top: 0,
+                  background: 'var(--bg-card-subtle)',
+                  zIndex: 2,
+                  borderBottom: '2px solid var(--border-color)',
+                }}
+              >
                 <tr>
-                  <th style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', width: '40px' }}>#</th>
+                  <th
+                    style={{
+                      borderRight: '1px solid var(--border-subtle)',
+                      padding: '10px 12px',
+                      width: '45px',
+                      color: 'var(--text-subtle)',
+                      textAlign: 'center',
+                      fontSize: '12px',
+                    }}
+                  >
+                    #
+                  </th>
                   {headers.map((h, i) => (
-                    <th key={i} style={{ borderBottom: '2px solid #ccc', borderRight: '1px solid #ddd', padding: '8px 10px', textAlign: 'left', whiteSpace: 'nowrap' }}>
+                    <th
+                      key={i}
+                      style={{
+                        borderRight: '1px solid var(--border-subtle)',
+                        padding: '10px 14px',
+                        textAlign: 'left',
+                        whiteSpace: 'nowrap',
+                        color: 'var(--text-main)',
+                        fontWeight: 600,
+                      }}
+                    >
                       {h || `Col ${colIndexToA1(i)}`}
                     </th>
                   ))}
@@ -196,8 +285,16 @@ export default function Data({
                 {currentPageRows.map((row, rIdx) => {
                   const originalRowIndex = rawRows.indexOf(row) + 2;
                   return (
-                    <tr key={rIdx} style={{ borderBottom: '1px solid #eee', background: rIdx % 2 === 0 ? '#fff' : '#fafafa' }}>
-                      <td style={{ borderRight: '1px solid #eee', padding: '6px 10px', color: '#888', textAlign: 'center', fontSize: '11px' }}>
+                    <tr key={rIdx} className="sheet-table-row">
+                      <td
+                        style={{
+                          borderRight: '1px solid var(--border-subtle)',
+                          padding: '8px 10px',
+                          color: 'var(--text-subtle)',
+                          textAlign: 'center',
+                          fontSize: '11px',
+                        }}
+                      >
                         {originalRowIndex}
                       </td>
                       {headers.map((_, cIdx) => {
@@ -209,17 +306,15 @@ export default function Data({
 
                         if (isColY && tabName === 'Cable Replacement' && cellValue) {
                           return (
-                            <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
+                            <td key={cIdx} className="sheet-cell">
                               <button
                                 onClick={() => navigate(`/dcr/${encodeURIComponent(cellValue)}`)}
+                                className="btn-secondary"
                                 style={{
-                                  background: '#e8f0fe',
-                                  color: '#1a73e8',
-                                  border: '1px solid #1a73e8',
                                   padding: '2px 8px',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 'bold',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  color: 'var(--btn-primary-bg)',
                                 }}
                               >
                                 {cellValue} ↗
@@ -231,20 +326,17 @@ export default function Data({
 
                         if (driveIds.length > 0) {
                           return (
-                            <td key={cIdx} style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap' }}>
-                              <div style={{ display: 'flex', gap: '4px' }}>
+                            <td key={cIdx} className="sheet-cell">
+                              <div style={{ display: 'flex', gap: '6px' }}>
                                 {driveIds.map((id, pIdx) => (
                                   <button
                                     key={id}
                                     onClick={() => setPreviewPhotoId(id)}
+                                    className="btn-secondary"
                                     style={{
-                                      padding: '2px 6px',
+                                      padding: '2px 8px',
                                       fontSize: '11px',
                                       borderRadius: '12px',
-                                      background: '#e8f0fe',
-                                      color: '#1a73e8',
-                                      border: '1px solid #1a73e8',
-                                      cursor: 'pointer',
                                     }}
                                   >
                                     📷 Photo {pIdx + 1}
@@ -259,8 +351,15 @@ export default function Data({
                         return (
                           <td
                             key={cIdx}
-                            onClick={() => setEditingCell({ cellA1, value: cellValue, sheetRow: originalRowIndex, colIndex: cIdx })}
-                            style={{ padding: '6px 10px', borderRight: '1px solid #eee', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                            onClick={() =>
+                              setEditingCell({
+                                cellA1,
+                                value: cellValue,
+                                sheetRow: originalRowIndex,
+                                colIndex: cIdx,
+                              })
+                            }
+                            className="sheet-cell sheet-cell-editable"
                             title={`Click to edit ${cellA1}`}
                           >
                             {cellValue}
@@ -275,16 +374,40 @@ export default function Data({
           </div>
 
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px' }}>
+          {/* Pagination Controls */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 18px',
+              borderTop: '1px solid var(--border-color)',
+              background: 'var(--bg-card-subtle)',
+              fontSize: '13px',
+              color: 'var(--text-muted)',
+            }}
+          >
             <div>
               Showing {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} style={{ padding: '5px 12px' }}>
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="btn-secondary"
+                style={{ padding: '5px 12px' }}
+              >
                 Previous
               </button>
-              <span>Page <strong>{page}</strong> of {totalPages}</span>
-              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} style={{ padding: '5px 12px' }}>
+              <span style={{ color: 'var(--text-main)' }}>
+                Page <strong>{page}</strong> of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="btn-secondary"
+                style={{ padding: '5px 12px' }}
+              >
                 Next
               </button>
               <select
@@ -293,7 +416,8 @@ export default function Data({
                   setPageSize(Number(e.target.value));
                   setPage(1);
                 }}
-                style={{ marginLeft: '10px', padding: '4px' }}
+                className="dcr-select"
+                style={{ marginLeft: '10px', padding: '4px 8px' }}
               >
                 <option value={25}>Show 25</option>
                 <option value={50}>Show 50</option>
@@ -301,9 +425,18 @@ export default function Data({
               </select>
             </div>
           </div>
-        </>
+        </div>
       ) : (
-        <div style={{ padding: '30px', textAlign: 'center', color: '#666' }}>
+        <div
+          style={{
+            padding: '40px',
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+          }}
+        >
           {loading ? 'Fetching records...' : 'No records loaded. Click Reload Tab above.'}
         </div>
       )}
@@ -316,30 +449,50 @@ export default function Data({
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backgroundColor: 'rgba(0, 0, 0, 0.85)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
           }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', padding: '16px', borderRadius: '8px', maxWidth: '90vw' }}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              padding: '16px',
+              borderRadius: '8px',
+              maxWidth: '90vw',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <a href={`https://drive.google.com/file/d/${previewPhotoId}/view`} target="_blank" rel="noreferrer" style={{ color: '#1a73e8', fontWeight: 'bold' }}>
+              <a
+                href={`https://drive.google.com/file/d/${previewPhotoId}/view`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'var(--btn-primary-bg)', fontWeight: 600, textDecoration: 'none' }}
+              >
                 Open Original in Drive ↗
               </a>
-              <button onClick={() => setPreviewPhotoId(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '18px' }}>
+              <button
+                onClick={() => setPreviewPhotoId(null)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  color: 'var(--text-main)',
+                }}
+              >
                 ✕
               </button>
             </div>
             <img
-              src={`https://drive.google.com/thumbnail?id=${previewPhotoId}&sz=w1200`}
+              src={`/api/drive/file/${previewPhotoId}?token=${encodeURIComponent(accessToken)}`}
               alt="Preview"
-              style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }}
-              onError={(e) => {
-                e.target.onerror = null;
-                e.target.src = `https://drive.google.com/uc?export=view&id=${previewPhotoId}`;
-              }}
+              style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain', borderRadius: '4px' }}
             />
           </div>
         </div>

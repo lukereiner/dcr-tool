@@ -11,7 +11,6 @@ function extractDriveFolderId(text) {
 }
 
 
-// Inline Spinner icon component
 function ButtonSpinner() {
   return (
     <span
@@ -29,6 +28,31 @@ function ButtonSpinner() {
 }
 
 
+const DROPDOWN_FIELD_OPTIONS = {
+  Z: ['Approved', 'Denied'],
+  AE: [
+    'Dante Hawkins',
+    'David Firewick',
+    'Jason Jones',
+    'James Naumann',
+    'Larry Burruel',
+    'Jose Diaz',
+    'Roy Ray',
+    'Steve McGraw',
+    'Jeremy Borreson',
+  ],
+  AG: [
+    'Pre Construction',
+    'Permitting in Process',
+    'Under Construction',
+    'Maintenance Tie',
+    'Completed',
+    'Canceled',
+  ],
+  AL: ['Yes', 'No'],
+};
+
+
 export default function DCRReview({ onRecordUpdated }) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
@@ -42,7 +66,6 @@ export default function DCRReview({ onRecordUpdated }) {
   const [savingField, setSavingField] = useState(null);
 
 
-  // Gallery & Carousel states
   const [photos, setPhotos] = useState([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [photosLoading, setPhotosLoading] = useState(false);
@@ -125,17 +148,14 @@ export default function DCRReview({ onRecordUpdated }) {
   };
 
 
-// Track the refresh signal so it only triggers on manual clicks, never on page mount
   const lastSignalRef = React.useRef(refreshSignal);
 
 
-  // Normal navigation load (reads from cache, 0 Google API calls if cached)
   useEffect(() => {
     loadDcr(false);
   }, [dcrId, accessToken]);
 
 
-  // Only force-refresh if the user clicks the Refresh button while this page is active
   useEffect(() => {
     if (refreshSignal > lastSignalRef.current) {
       lastSignalRef.current = refreshSignal;
@@ -185,7 +205,7 @@ export default function DCRReview({ onRecordUpdated }) {
 
   if (loading) {
     return (
-      <div style={{ padding: '30px', fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ padding: '30px', color: 'var(--text-main)' }}>
         <h2>Loading DCR #{dcrId}...</h2>
       </div>
     );
@@ -194,11 +214,11 @@ export default function DCRReview({ onRecordUpdated }) {
 
   if (!dcrData) {
     return (
-      <div style={{ padding: '30px', fontFamily: 'system-ui, sans-serif' }}>
-        <button onClick={() => navigate('/')} style={{ padding: '8px 16px', cursor: 'pointer', marginBottom: '16px' }}>
+      <div style={{ padding: '30px' }}>
+        <button onClick={() => navigate('/')} className="btn-secondary" style={{ marginBottom: '16px' }}>
           ← Back to All Records
         </button>
-        <p style={{ color: '#c00' }}>DCR record "{dcrId}" could not be found.</p>
+        <p style={{ color: '#d93025' }}>DCR record "{dcrId}" could not be found.</p>
       </div>
     );
   }
@@ -208,12 +228,15 @@ export default function DCRReview({ onRecordUpdated }) {
   const readOnlySpecs = dcrData.fields.filter(
     (f) => f.isReadOnly && ![20, 21, 22].includes(f.colIndex)
   );
-  const postSpecsFields = dcrData.fields.filter((f) => f.colIndex > 24);
+  const postSpecsFields = dcrData.fields.filter(
+    (f) => f.colIndex > 24 && f.colLetter !== 'AR'
+  );
+  const commentsField = dcrData.fields.find((f) => f.colLetter === 'AR');
   const activePhoto = photos[activePhotoIndex];
 
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
       <style>{`
         @keyframes btnSpin {
           0% { transform: rotate(0deg); }
@@ -222,60 +245,51 @@ export default function DCRReview({ onRecordUpdated }) {
       `}</style>
 
 
-      {/* Top Navigation */}
+      {/* Top Navigation Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <button
           onClick={() => navigate('/')}
-          style={{ padding: '8px 16px', background: '#f1f3f4', border: '1px solid #ccc', borderRadius: '4px', cursor: 'pointer' }}
+          className="btn-secondary"
         >
           ← Back to All Records
         </button>
-        <span style={{ fontSize: '13px', color: '#666' }}>Sheet Row #{dcrData.sheetRowNumber}</span>
+        <span style={{ fontSize: '13px', color: 'var(--text-subtle)' }}>Sheet Row #{dcrData.sheetRowNumber}</span>
       </div>
 
 
       {/* Header Banner */}
-      <div style={{ background: '#1a73e8', color: '#fff', padding: '16px 20px', borderRadius: '8px', marginBottom: '24px' }}>
+      <div style={{ background: 'var(--btn-primary-bg)', color: '#ffffff', padding: '16px 20px', borderRadius: '8px', marginBottom: '24px' }}>
         <h1 style={{ margin: 0, fontSize: '24px' }}>{dcrId}</h1>
         <p style={{ margin: '4px 0 0 0', opacity: 0.9, fontSize: '14px' }}>
-          * can put other info that is useful here *
+          Cable Replacement Review & Operational Workspace
         </p>
       </div>
 
 
       {/* Section 1: Manager Sign-offs (Columns A & B) */}
-      <div style={{ background: '#fff', border: '1px solid #d2e3fc', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-        <h3 style={{ margin: '0 0 12px 0', color: '#1967d2', fontSize: '16px' }}>Manager Approval & Sign-Off (Cols A & B)</h3>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
+        <h3 style={{ margin: '0 0 12px 0', color: 'var(--btn-primary-bg)', fontSize: '16px' }}>Manager Approval & Sign-Off (Cols A & B)</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
           {managerSignOffs.map((f) => {
             const isSaving = savingField === f.colLetter;
             return (
-              <div key={f.colLetter} style={{ background: '#f8fafd', padding: '12px', borderRadius: '6px', border: '1px solid #e8f0fe' }}>
-                <label style={{ display: 'block', fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
+              <div key={f.colLetter} style={{ background: 'var(--bg-card-subtle)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <label style={{ display: 'block', fontWeight: 600, fontSize: '13px', marginBottom: '6px', color: 'var(--text-main)' }}>
                   {f.header} ({f.colLetter})
                 </label>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
+                    className="dcr-input"
                     value={formValues[f.colLetter] ?? ''}
                     onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
-                    style={{ flex: 1, padding: '6px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
+                    style={{ flex: 1 }}
                   />
                   <button
                     onClick={() => handleSaveField(f.colLetter, f.header, f.colIndex)}
                     disabled={isSaving}
-                    style={{
-                      minWidth: '72px',
-                      padding: '6px 14px',
-                      background: '#1a73e8',
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: isSaving ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
+                    className="btn-primary"
+                    style={{ minWidth: '72px' }}
                   >
                     {isSaving ? <ButtonSpinner /> : 'Save'}
                   </button>
@@ -288,17 +302,20 @@ export default function DCRReview({ onRecordUpdated }) {
 
 
       {/* Section 2: Locked Form Specs */}
-      <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px' }}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h3 style={{ margin: 0, fontSize: '16px' }}>Locked DCR Form Data (Cols C through Y)</h3>
+          <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-main)' }}>Locked DCR Form Data (Cols C through Y)</h3>
+          <span style={{ fontSize: '11px', background: 'var(--bg-card-subtle)', border: '1px solid var(--border-subtle)', padding: '3px 8px', borderRadius: '12px', color: 'var(--text-muted)' }}>
+            🔒 Protected Source of Truth
+          </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
           {readOnlySpecs.map((f) => (
-            <div key={f.colLetter} style={{ background: '#fafafa', border: '1px solid #eee', padding: '10px', borderRadius: '6px' }}>
-              <div style={{ fontSize: '11px', color: '#777', textTransform: 'uppercase', marginBottom: '4px' }}>
+            <div key={f.colLetter} style={{ background: 'var(--bg-card-subtle)', border: '1px solid var(--border-subtle)', padding: '10px', borderRadius: '6px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '4px' }}>
                 {f.header} ({f.colLetter})
               </div>
-              <div style={{ fontSize: '14px', fontWeight: 500, wordBreak: 'break-word', color: f.value ? '#222' : '#999' }}>
+              <div style={{ fontSize: '14px', fontWeight: 500, wordBreak: 'break-word', color: f.value ? 'var(--text-main)' : 'var(--text-subtle)' }}>
                 {f.value || '—'}
               </div>
             </div>
@@ -308,11 +325,11 @@ export default function DCRReview({ onRecordUpdated }) {
 
 
       {/* Section 3: Dedicated Inspection Photo Carousel */}
-      <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '20px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '16px', color: '#202124' }}>Inspection Photos (Cols U, V, W)</h3>
-            <span style={{ fontSize: '12px', color: '#666' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-main)' }}>Inspection Photos (Cols U, V, W)</h3>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
               {photos.length > 0 ? `${photos.length} photos loaded from submitted folder` : 'Drive Folder Inspection Gallery'}
             </span>
           </div>
@@ -323,19 +340,8 @@ export default function DCRReview({ onRecordUpdated }) {
               href={folderUrl}
               target="_blank"
               rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                background: '#e8f0fe',
-                color: '#1a73e8',
-                borderRadius: '16px',
-                border: '1px solid #1a73e8',
-                textDecoration: 'none',
-                fontSize: '12px',
-                fontWeight: 600,
-              }}
+              className="btn-secondary"
+              style={{ textDecoration: 'none', borderRadius: '16px', fontSize: '12px', fontWeight: 600 }}
             >
               📁 Open Folder in Google Drive ↗
             </a>
@@ -344,11 +350,11 @@ export default function DCRReview({ onRecordUpdated }) {
 
 
         {photosLoading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#666', background: '#fafafa', borderRadius: '6px' }}>
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', background: 'var(--bg-card-subtle)', borderRadius: '6px' }}>
             Scanning Drive folder for inspection photos...
           </div>
         ) : photos.length === 0 ? (
-          <div style={{ padding: '30px', textAlign: 'center', color: '#888', background: '#fafafa', borderRadius: '6px' }}>
+          <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-subtle)', background: 'var(--bg-card-subtle)', borderRadius: '6px' }}>
             {folderUrl ? 'No image files detected in this folder link.' : 'No photo folder attached to this DCR.'}
           </div>
         ) : (
@@ -356,7 +362,7 @@ export default function DCRReview({ onRecordUpdated }) {
             <div
               style={{
                 position: 'relative',
-                background: '#111',
+                background: '#0a0a0a',
                 borderRadius: '8px',
                 height: '460px',
                 display: 'flex',
@@ -371,8 +377,8 @@ export default function DCRReview({ onRecordUpdated }) {
                   position: 'absolute',
                   left: '16px',
                   zIndex: 2,
-                  background: 'rgba(0,0,0,0.5)',
-                  color: '#fff',
+                  background: 'rgba(0,0,0,0.6)',
+                  color: '#ffffff',
                   border: 'none',
                   borderRadius: '50%',
                   width: '40px',
@@ -405,8 +411,8 @@ export default function DCRReview({ onRecordUpdated }) {
                   position: 'absolute',
                   right: '16px',
                   zIndex: 2,
-                  background: 'rgba(0,0,0,0.5)',
-                  color: '#fff',
+                  background: 'rgba(0,0,0,0.6)',
+                  color: '#ffffff',
                   border: 'none',
                   borderRadius: '50%',
                   width: '40px',
@@ -423,8 +429,8 @@ export default function DCRReview({ onRecordUpdated }) {
                 style={{
                   position: 'absolute',
                   bottom: '12px',
-                  background: 'rgba(0,0,0,0.65)',
-                  color: '#fff',
+                  background: 'rgba(0,0,0,0.75)',
+                  color: '#ffffff',
                   padding: '4px 14px',
                   borderRadius: '16px',
                   fontSize: '12px',
@@ -449,8 +455,8 @@ export default function DCRReview({ onRecordUpdated }) {
                     borderRadius: '4px',
                     overflow: 'hidden',
                     cursor: 'pointer',
-                    border: idx === activePhotoIndex ? '2px solid #1a73e8' : '1px solid #ddd',
-                    opacity: idx === activePhotoIndex ? 1 : 0.65,
+                    border: idx === activePhotoIndex ? '2px solid var(--btn-primary-bg)' : '1px solid var(--border-color)',
+                    opacity: idx === activePhotoIndex ? 1 : 0.6,
                   }}
                 >
                   <img
@@ -466,40 +472,52 @@ export default function DCRReview({ onRecordUpdated }) {
       </div>
 
 
-      {/* Section 4: Post-Spec Processing Fields (Column Z onward) */}
+      {/* Section 4: Post-Spec Processing Fields (All buttons unified to primary blue) */}
       {postSpecsFields.length > 0 && (
-        <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '16px 20px' }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>Downstream Processing & Workday Tracking (Col Z+)</h3>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
+          <h3 style={{ margin: '0 0 12px 0', fontSize: '16px', color: 'var(--text-main)' }}>Downstream Processing & Workday Tracking (Col Z+)</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
             {postSpecsFields.map((f) => {
               const isSaving = savingField === f.colLetter;
+              const dropdownOptions = DROPDOWN_FIELD_OPTIONS[f.colLetter];
+
+
               return (
-                <div key={f.colLetter} style={{ background: '#fafafa', padding: '12px', borderRadius: '6px', border: '1px solid #eee' }}>
-                  <label style={{ display: 'block', fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
+                <div key={f.colLetter} style={{ background: 'var(--bg-card-subtle)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                  <label style={{ display: 'block', fontWeight: 600, fontSize: '13px', marginBottom: '6px', color: 'var(--text-main)' }}>
                     {f.header} ({f.colLetter})
                   </label>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      value={formValues[f.colLetter] ?? ''}
-                      onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
-                      style={{ flex: 1, padding: '6px 10px', borderRadius: '4px', border: '1px solid #ccc' }}
-                    />
+                    {dropdownOptions ? (
+                      <select
+                        className="dcr-select"
+                        value={formValues[f.colLetter] ?? ''}
+                        onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">- Select -</option>
+                        {dropdownOptions.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        className="dcr-input"
+                        value={formValues[f.colLetter] ?? ''}
+                        onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
+                        style={{ flex: 1 }}
+                      />
+                    )}
+
+
                     <button
                       onClick={() => handleSaveField(f.colLetter, f.header, f.colIndex)}
                       disabled={isSaving}
-                      style={{
-                        minWidth: '72px',
-                        padding: '6px 14px',
-                        background: '#34a853',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: isSaving ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
+                      className="btn-primary"
+                      style={{ minWidth: '72px' }}
                     >
                       {isSaving ? <ButtonSpinner /> : 'Save'}
                     </button>
@@ -512,6 +530,41 @@ export default function DCRReview({ onRecordUpdated }) {
       )}
 
 
+      {/* Section 5: Dedicated Full-Width Comments (Column AR) */}
+      {commentsField && (
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-main)' }}>
+              {commentsField.header || 'Comments'} ({commentsField.colLetter})
+            </h3>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Multi-line notes and project remarks</span>
+          </div>
+
+
+          <textarea
+            rows={5}
+            className="dcr-textarea"
+            value={formValues[commentsField.colLetter] ?? ''}
+            onChange={(e) => setFormValues({ ...formValues, [commentsField.colLetter]: e.target.value })}
+            placeholder="Enter review remarks, coordinator notes, or reason for status update..."
+            style={{ width: '100%', marginBottom: '12px', resize: 'vertical' }}
+          />
+
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => handleSaveField(commentsField.colLetter, commentsField.header, commentsField.colIndex)}
+              disabled={savingField === commentsField.colLetter}
+              className="btn-primary"
+              style={{ minWidth: '120px', padding: '8px 20px', fontWeight: 600 }}
+            >
+              {savingField === commentsField.colLetter ? <ButtonSpinner /> : 'Save Comments'}
+            </button>
+          </div>
+        </div>
+      )}
+
+
       {/* Fullscreen Lightbox Modal */}
       {lightboxOpen && activePhoto && (
         <div
@@ -519,7 +572,7 @@ export default function DCRReview({ onRecordUpdated }) {
           style={{
             position: 'fixed',
             inset: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.85)',
+            backgroundColor: 'rgba(0, 0, 0, 0.88)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -533,13 +586,13 @@ export default function DCRReview({ onRecordUpdated }) {
                 href={activePhoto.webViewLink || `https://drive.google.com/file/d/${activePhoto.id}/view`}
                 target="_blank"
                 rel="noreferrer"
-                style={{ color: '#fff', textDecoration: 'underline', fontSize: '14px', fontWeight: 500 }}
+                style={{ color: '#ffffff', textDecoration: 'underline', fontSize: '14px', fontWeight: 500 }}
               >
                 Open Original in Drive ↗
               </a>
               <button
                 onClick={() => setLightboxOpen(false)}
-                style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '24px', cursor: 'pointer' }}
+                style={{ background: 'transparent', border: 'none', color: '#ffffff', fontSize: '24px', cursor: 'pointer' }}
               >
                 ✕
               </button>

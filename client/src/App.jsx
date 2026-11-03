@@ -85,7 +85,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
 
 
 // Navigation Bar
-function NavigationBar({ onRefresh, loading, onLogout }) {
+function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
   const location = useLocation();
 
 
@@ -98,11 +98,11 @@ function NavigationBar({ onRefresh, loading, onLogout }) {
 
 
   return (
-    <header style={{ background: '#ffffff', borderBottom: '1px solid #dadce0', padding: '0 24px', marginBottom: '24px' }}>
+    <header style={{ background: 'var(--bg-card)', borderBottom: '1px solid var(--border-color)', padding: '0 24px', marginBottom: '24px' }}>
       <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: '64px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-          <div style={{ fontWeight: 700, fontSize: '18px', color: '#1a73e8' }}>
-            OHIO | Project Tracker
+          <div style={{ fontWeight: 700, fontSize: '18px', color: 'var(--btn-primary-bg)' }}>
+            OHIO | F27 Tracking
           </div>
 
 
@@ -111,39 +111,46 @@ function NavigationBar({ onRefresh, loading, onLogout }) {
               const active = location.pathname === item.path;
               return (
                 <Link
-                  key={item.path}
-                  to={item.path}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '4px',
-                    textDecoration: 'none',
-                    fontSize: '14px',
-                    fontWeight: active ? 600 : 500,
-                    color: active ? '#1a73e8' : '#5f6368',
-                    background: active ? '#e8f0fe' : 'transparent',
-                  }}
-                >
-                  {item.label}
-                </Link>
+  key={item.path}
+  to={item.path}
+  style={{
+    padding: '8px 16px',
+    borderRadius: '6px',
+    textDecoration: 'none',
+    fontSize: '14px',
+    fontWeight: active ? 600 : 500,
+    color: active ? 'var(--btn-primary-bg)' : 'var(--text-muted)',
+    background: active ? 'var(--bg-card-subtle)' : 'transparent',
+  }}
+>
+  {item.label}
+</Link>
               );
             })}
           </nav>
         </div>
 
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Top Right Action Cluster */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Theme Toggle Button */}
+          <button
+            onClick={onToggleTheme}
+            className="btn-secondary"
+            style={{ padding: '7px 12px', fontSize: '15px' }}
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+          >
+            {theme === 'dark' ? '🌙' : '☀️'}
+          </button>
+
+
           <RefreshButton onRefresh={onRefresh} loading={loading} />
+
+
           <button
             onClick={onLogout}
-            style={{
-              padding: '7px 12px',
-              background: '#f1f3f4',
-              border: '1px solid #dadce0',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              color: '#3c4043',
-            }}
+            className="btn-secondary"
+            style={{ padding: '7px 14px' }}
           >
             Sign Out
           </button>
@@ -258,6 +265,22 @@ const handleGlobalRefresh = (forceRefresh = true) => {
     });
   };
 
+  // Manage Theme State
+const [theme, setTheme] = useState(() => {
+  return localStorage.getItem('dcr_theme') || 'light';
+});
+
+
+useEffect(() => {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('dcr_theme', theme);
+}, [theme]);
+
+
+const toggleTheme = () => {
+  setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+};
+
 
   return (
     <AuthContext.Provider value={{ accessToken, logout, refreshSignal }}>
@@ -265,11 +288,13 @@ const handleGlobalRefresh = (forceRefresh = true) => {
         {!accessToken ? (
           <LoginView onLoginSuccess={handleLoginSuccess} sessionExpired={sessionExpired} />
         ) : (
-          <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+          <div style={{ minHeight: '100vh', background: 'var(--bg-page)', color: 'var(--text-main)' }}>
             <NavigationBar
               onRefresh={handleGlobalRefresh}
               loading={loading}
               onLogout={() => logout(false)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
             />
 
 
