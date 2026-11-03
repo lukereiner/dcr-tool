@@ -305,9 +305,6 @@ export default function DCRReview({ onRecordUpdated }) {
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-main)' }}>Locked DCR Form Data (Cols C through Y)</h3>
-          <span style={{ fontSize: '11px', background: 'var(--bg-card-subtle)', border: '1px solid var(--border-subtle)', padding: '3px 8px', borderRadius: '12px', color: 'var(--text-muted)' }}>
-            🔒 Protected Source of Truth
-          </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
           {readOnlySpecs.map((f) => (
@@ -533,11 +530,10 @@ export default function DCRReview({ onRecordUpdated }) {
       {/* Section 5: Dedicated Full-Width Comments (Column AR) */}
       {commentsField && (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px 20px', marginBottom: '24px', boxShadow: 'var(--shadow-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
             <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--text-main)' }}>
               {commentsField.header || 'Comments'} ({commentsField.colLetter})
             </h3>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Multi-line notes and project remarks</span>
           </div>
 
 
