@@ -89,47 +89,70 @@ export default function Coordinator({
   }, [dropdownOptions]);
 
 
-  const [selectedStatus, setSelectedStatus] = useState("Under Construction");
+  // Persistent multi-status selection (empty array = show all)
+  const [selectedStatuses, setSelectedStatuses] = useState(() => {
+    try {
+      const saved = localStorage.getItem("coordinator_selected_statuses");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+
   const [updatingRow, setUpdatingRow] = useState(null);
-  
-  // Persistent technician filter state
+
+
+  // Persistent technician filter
   const [selectedTech, setSelectedTech] = useState(() => {
     return localStorage.getItem("coordinator_tech") || "All";
   });
 
 
-  // Pagination states
-  const [page, setPage] = useState(1);
+  // Persistent page size (defaults to 15)
   const [pageSize, setPageSize] = useState(() => {
-  const saved = localStorage.getItem("coordinator_page_size");
-  return saved ? Number(saved) : 15;
-});
+    const saved = localStorage.getItem("coordinator_page_size");
+    return saved ? Number(saved) : 15;
+  });
 
 
-  // Sync technician selection to local storage and reset page when it changes
+  const [page, setPage] = useState(1);
+
+
+  // Sync state changes to localStorage and reset page
+  useEffect(() => {
+    localStorage.setItem("coordinator_selected_statuses", JSON.stringify(selectedStatuses));
+    setPage(1);
+  }, [selectedStatuses]);
+
+
   useEffect(() => {
     localStorage.setItem("coordinator_tech", selectedTech);
     setPage(1);
   }, [selectedTech]);
 
 
-  // Reset page when switching status
   useEffect(() => {
+    localStorage.setItem("coordinator_page_size", String(pageSize));
     setPage(1);
-  }, [selectedStatus]);
+  }, [pageSize]);
 
-  useEffect(() => {
-  localStorage.setItem("coordinator_page_size", String(pageSize));
-}, [pageSize]);
+
+  // Toggle status selection on pill click
+  const toggleStatus = (status) => {
+    setSelectedStatuses((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
+  };
 
 
   const rows = useMemo(() => {
-    if (!sheetData || sheetData.length < 2) return [];
-    return sheetData.slice(1);
+    if (!sheetData || sheetData.length < 3) return [];
+    return sheetData.slice(2);
   }, [sheetData]);
 
 
-  // KPIs now filter based on the selected technician
+  // KPIs scoped by selected technician
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -144,7 +167,6 @@ export default function Coordinator({
       const contractor = String(row[34] || "").trim(); // Col AI
 
 
-      // Skip row if a specific tech is selected and it doesn't match
       if (selectedTech !== "All" && tech !== selectedTech) {
         return;
       }
@@ -174,9 +196,10 @@ export default function Coordinator({
   }, [rows, selectedTech]);
 
 
-  // Filter rows by Status AND Technician
+  // Filter rows by multi-selected statuses (or all if none selected) AND technician
   const filteredRows = useMemo(() => {
     const matches = [];
+    const hasStatusFilter = selectedStatuses.length > 0;
 
 
     for (let i = 0; i < rows.length; i++) {
@@ -185,14 +208,16 @@ export default function Coordinator({
       const status = String(row[32] || "").trim(); // Col AG
 
 
-      const statusMatch = status.toLowerCase() === selectedStatus.toLowerCase();
+      const statusMatch = !hasStatusFilter || selectedStatuses.some(
+        (s) => s.toLowerCase() === status.toLowerCase()
+      );
       const techMatch = selectedTech === "All" || tech === selectedTech;
 
 
       if (statusMatch && techMatch) {
         matches.push({
           row,
-          sheetRowNumber: i + 2,
+          sheetRowNumber: i + 3,
         });
       }
     }
@@ -201,15 +226,15 @@ export default function Coordinator({
     matches.sort((a, b) => {
       const dateA = new Date(a.row[2] || 0);
       const dateB = new Date(b.row[2] || 0);
-      return dateB - dateA; // Descending (newest first)
+      return dateB - dateA;
     });
 
 
-    return matches; // Uncapped matches
-  }, [rows, selectedStatus, selectedTech]);
+    return matches;
+  }, [rows, selectedStatuses, selectedTech]);
 
 
-  // Pagination Logic
+  // Pagination slice
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -258,7 +283,6 @@ export default function Coordinator({
   return (
     <div style={{ maxWidth: "1280px", margin: "0 auto" }}>
       <style>{`
-        /* Dynamic Theme helpers for Status Filter Pills and Dropdowns */
         .status-pill {
           padding: 6px 14px;
           border-radius: 20px;
@@ -270,6 +294,7 @@ export default function Coordinator({
           background: var(--bg-card);
           color: var(--text-muted);
           white-space: nowrap;
+          user-select: none;
         }
         .status-pill:hover {
           background: var(--bg-card-subtle);
@@ -280,7 +305,6 @@ export default function Coordinator({
         }
 
 
-        /* Light Theme Active Pill */
         :root .status-pill.active {
           background: #e8f0fe;
           color: #1a73e8;
@@ -288,7 +312,6 @@ export default function Coordinator({
         }
 
 
-        /* Dark Theme Active Pill */
         [data-theme='dark'] .status-pill.active {
           background: #1e293b;
           color: #60a5fa;
@@ -296,7 +319,6 @@ export default function Coordinator({
         }
 
 
-        /* Table Row Styling */
         .dcr-table-row {
           border-bottom: 1px solid var(--border-subtle);
           transition: background-color 0.15s ease;
@@ -306,7 +328,6 @@ export default function Coordinator({
         }
 
 
-        /* Theme-aware Status Select Badge */
         .status-select-badge {
           padding: 4px 10px;
           border-radius: 6px;
@@ -343,33 +364,13 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
             Active Builds
           </div>
-          <div
-            style={{
-              fontSize: "28px",
-              fontWeight: 700,
-              color: "#1a73e8",
-              marginTop: "6px",
-            }}
-          >
+          <div style={{ fontSize: "28px", fontWeight: 700, color: "#1a73e8", marginTop: "6px" }}>
             {kpis.totalActive}
           </div>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-subtle)",
-              marginTop: "4px",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
             Excludes completed & canceled
           </div>
         </div>
@@ -384,33 +385,13 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
             Under Construction
           </div>
-          <div
-            style={{
-              fontSize: "28px",
-              fontWeight: 700,
-              color: "#f59e0b",
-              marginTop: "6px",
-            }}
-          >
+          <div style={{ fontSize: "28px", fontWeight: 700, color: "#f59e0b", marginTop: "6px" }}>
             {kpis.underConstruction}
           </div>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-subtle)",
-              marginTop: "4px",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
             Active field work
           </div>
         </div>
@@ -425,33 +406,13 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
             Pre Construction
           </div>
-          <div
-            style={{
-              fontSize: "28px",
-              fontWeight: 700,
-              color: "var(--text-muted)",
-              marginTop: "6px",
-            }}
-          >
+          <div style={{ fontSize: "28px", fontWeight: 700, color: "var(--text-muted)", marginTop: "6px" }}>
             {kpis.preConstruction}
           </div>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-subtle)",
-              marginTop: "4px",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
             Awaiting mobilization
           </div>
         </div>
@@ -466,33 +427,13 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
             Total Completed
           </div>
-          <div
-            style={{
-              fontSize: "28px",
-              fontWeight: 700,
-              color: "#10b981",
-              marginTop: "6px",
-            }}
-          >
+          <div style={{ fontSize: "28px", fontWeight: 700, color: "#10b981", marginTop: "6px" }}>
             {kpis.completed}
           </div>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-subtle)",
-              marginTop: "4px",
-            }}
-          >
+          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
             Finished DCR records
           </div>
         </div>
@@ -519,14 +460,15 @@ export default function Coordinator({
             gap: "16px",
           }}
         >
-          {/* Status Filter Toggle Pills */}
+          {/* Status Multi-Select Toggle Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {statusOptions.map((status) => {
-              const active = selectedStatus === status;
+              const active = selectedStatuses.includes(status);
               return (
                 <button
                   key={status}
-                  onClick={() => setSelectedStatus(status)}
+                  type="button"
+                  onClick={() => toggleStatus(status)}
                   className={`status-pill ${active ? "active" : ""}`}
                 >
                   {status}
@@ -582,75 +524,25 @@ export default function Coordinator({
               }}
             >
               <tr>
-                <th
-                  style={{
-                    width: "15%",
-                    padding: "10px 16px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "15%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)" }}>
                   DCR ID
                 </th>
-                <th
-                  style={{
-                    width: "14%",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "14%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Date Submitted
                 </th>
-                <th
-                  style={{
-                    width: "11%",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "11%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Node #
                 </th>
-                <th
-                  style={{
-                    width: "13%",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "13%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Region
                 </th>
-                <th
-                  style={{
-                    width: "18%",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "18%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Contractor
                 </th>
-                <th
-                  style={{
-                    width: "19%",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                  }}
-                >
+                <th style={{ width: "19%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Status (Col AG)
                 </th>
-                <th
-                  style={{
-                    width: "10%",
-                    padding: "10px 16px",
-                    fontWeight: 600,
-                    color: "var(--text-main)",
-                    textAlign: "center",
-                  }}
-                >
+                <th style={{ width: "10%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)", textAlign: "center" }}>
                   Action
                 </th>
               </tr>
@@ -668,9 +560,7 @@ export default function Coordinator({
                   >
                     {loading
                       ? "Loading records..."
-                      : `No records found for ${
-                          selectedTech !== "All" ? `technician "${selectedTech}"` : "any technician"
-                        } in status "${selectedStatus}".`}
+                      : `No records found matching the active status and technician filters.`}
                   </td>
                 </tr>
               ) : (
@@ -713,37 +603,16 @@ export default function Coordinator({
                           {dcrId} ↗
                         </button>
                       </td>
-                      <td
-                        style={{
-                          padding: "10px 12px",
-                          color: "var(--text-muted)",
-                        }}
-                      >
+                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
                         {dateSub}
                       </td>
-                      <td
-                        style={{
-                          padding: "10px 12px",
-                          fontWeight: 500,
-                          color: "var(--text-main)",
-                        }}
-                      >
+                      <td style={{ padding: "10px 12px", fontWeight: 500, color: "var(--text-main)" }}>
                         {nodeNum}
                       </td>
-                      <td
-                        style={{
-                          padding: "10px 12px",
-                          color: "var(--text-muted)",
-                        }}
-                      >
+                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
                         {region}
                       </td>
-                      <td
-                        style={{
-                          padding: "10px 12px",
-                          color: "var(--text-muted)",
-                        }}
-                      >
+                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
                         {contractor}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
@@ -761,13 +630,9 @@ export default function Coordinator({
                             color: badgeText,
                           }}
                         >
-                          {/* If row has an existing status no longer in options, preserve it */}
-                          {currentStatus &&
-                            !statusOptions.includes(currentStatus) && (
-                              <option value={currentStatus}>
-                                {currentStatus}
-                              </option>
-                            )}
+                          {currentStatus && !statusOptions.includes(currentStatus) && (
+                            <option value={currentStatus}>{currentStatus}</option>
+                          )}
                           {statusOptions.map((opt) => (
                             <option key={opt} value={opt}>
                               {opt}
@@ -812,10 +677,8 @@ export default function Coordinator({
           }}
         >
           <div>
-            Showing{" "}
-            {filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1}
-            –{Math.min(page * pageSize, filteredRows.length)} of{" "}
-            {filteredRows.length} rows
+            Showing {filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1}
+            –{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <button
