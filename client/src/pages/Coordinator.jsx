@@ -60,6 +60,19 @@ const STATUS_COLORS = {
 };
 
 
+// Column index mapping for sorting
+const SORT_COLUMNS = {
+  dcrId: { colIdx: 24, label: "DCR ID", isDate: false },
+  dateSubmitted: { colIdx: 2, label: "Date Submitted", isDate: true },
+  nodeNum: { colIdx: 12, label: "Node #", isDate: false },
+  region: { colIdx: 5, label: "Region", isDate: false },
+  contractor: { colIdx: 34, label: "Contractor", isDate: false },
+};
+
+
+const DEFAULT_SORT_CHAIN = [{ key: "dateSubmitted", direction: "desc" }];
+
+
 export default function Coordinator({
   sheetData,
   onRefresh,
@@ -116,6 +129,17 @@ export default function Coordinator({
   });
 
 
+  // Persistent multi-column sort chain
+  const [sortChain, setSortChain] = useState(() => {
+    try {
+      const saved = localStorage.getItem("coordinator_sort_chain");
+      return saved ? JSON.parse(saved) : DEFAULT_SORT_CHAIN;
+    } catch {
+      return DEFAULT_SORT_CHAIN;
+    }
+  });
+
+
   const [page, setPage] = useState(1);
 
 
@@ -138,6 +162,12 @@ export default function Coordinator({
   }, [pageSize]);
 
 
+  useEffect(() => {
+    localStorage.setItem("coordinator_sort_chain", JSON.stringify(sortChain));
+    setPage(1);
+  }, [sortChain]);
+
+
   // Toggle status selection on pill click
   const toggleStatus = (status) => {
     setSelectedStatuses((prev) =>
@@ -146,6 +176,36 @@ export default function Coordinator({
   };
 
 
+// Uniform 3-state cycle for every column:
+  // [None] -> [asc] -> [desc] -> [None]
+  const handleSortClick = (columnKey) => {
+    setSortChain((prevChain) => {
+      const existingIndex = prevChain.findIndex((item) => item.key === columnKey);
+
+
+      // State 1: Column is not currently active -> Set to 'asc' as primary
+      if (existingIndex === -1) {
+        return [{ key: columnKey, direction: "asc" }, ...prevChain];
+      }
+
+
+      const current = prevChain[existingIndex];
+
+
+      // State 2: Currently 'asc' -> Move to 'desc'
+      if (current.direction === "asc") {
+        const withoutCurrent = prevChain.filter((item) => item.key !== columnKey);
+        return [{ key: columnKey, direction: "desc" }, ...withoutCurrent];
+      }
+
+
+      // State 3: Currently 'desc' -> Remove completely (Unsorted / Natural)
+      return prevChain.filter((item) => item.key !== columnKey);
+    });
+  };
+
+
+  // Slice past header and subheader (starts on sheet row 3)
   const rows = useMemo(() => {
     if (!sheetData || sheetData.length < 3) return [];
     return sheetData.slice(2);
@@ -196,7 +256,7 @@ export default function Coordinator({
   }, [rows, selectedTech]);
 
 
-  // Filter rows by multi-selected statuses (or all if none selected) AND technician
+  // Filter rows by multi-selected statuses AND technician, then multi-sort
   const filteredRows = useMemo(() => {
     const matches = [];
     const hasStatusFilter = selectedStatuses.length > 0;
@@ -208,9 +268,9 @@ export default function Coordinator({
       const status = String(row[32] || "").trim(); // Col AG
 
 
-      const statusMatch = !hasStatusFilter || selectedStatuses.some(
-        (s) => s.toLowerCase() === status.toLowerCase()
-      );
+      const statusMatch =
+        !hasStatusFilter ||
+        selectedStatuses.some((s) => s.toLowerCase() === status.toLowerCase());
       const techMatch = selectedTech === "All" || tech === selectedTech;
 
 
@@ -223,15 +283,44 @@ export default function Coordinator({
     }
 
 
-    matches.sort((a, b) => {
-      const dateA = new Date(a.row[2] || 0);
-      const dateB = new Date(b.row[2] || 0);
-      return dateB - dateA;
-    });
+    // Only sort if there are active items in sortChain; otherwise keep natural sheet order
+    if (sortChain.length > 0) {
+      matches.sort((a, b) => {
+        for (const sortItem of sortChain) {
+          const config = SORT_COLUMNS[sortItem.key];
+          if (!config) continue;
+
+
+          const valA = a.row[config.colIdx] ?? "";
+          const valB = b.row[config.colIdx] ?? "";
+
+
+          let comparison = 0;
+
+
+          if (config.isDate) {
+            const timeA = new Date(valA || 0).getTime();
+            const timeB = new Date(valB || 0).getTime();
+            comparison = timeA - timeB;
+          } else {
+            comparison = String(valA).localeCompare(String(valB), undefined, {
+              numeric: true,
+              sensitivity: "base",
+            });
+          }
+
+
+          if (comparison !== 0) {
+            return sortItem.direction === "asc" ? comparison : -comparison;
+          }
+        }
+        return 0;
+      });
+    }
 
 
     return matches;
-  }, [rows, selectedStatuses, selectedTech]);
+  }, [rows, selectedStatuses, selectedTech, sortChain]);
 
 
   // Pagination slice
@@ -277,6 +366,39 @@ export default function Coordinator({
     } finally {
       setUpdatingRow(null);
     }
+  };
+
+
+  // Helper to render sort arrows and priority badge in table headers
+  const renderSortIndicator = (columnKey) => {
+    const index = sortChain.findIndex((item) => item.key === columnKey);
+    if (index === -1) {
+      return (
+        <span style={{ opacity: 0.3, marginLeft: "6px", fontSize: "11px" }}>
+          ▲▼
+        </span>
+      );
+    }
+
+
+    const { direction } = sortChain[index];
+
+
+    return (
+      <span
+        style={{
+          marginLeft: "6px",
+          color: "var(--btn-primary-bg)",
+          fontWeight: 700,
+          fontSize: "12px",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "2px",
+        }}
+      >
+        <span>{direction === "asc" ? "▲" : "▼"}</span>
+      </span>
+    );
   };
 
 
@@ -342,6 +464,16 @@ export default function Coordinator({
         }
         [data-theme='dark'] .status-select-badge {
           border: 1px solid #3f4756;
+        }
+
+
+        .sortable-th {
+          cursor: pointer;
+          user-select: none;
+          transition: background-color 0.15s ease;
+        }
+        .sortable-th:hover {
+          background-color: var(--bg-input);
         }
       `}</style>
 
@@ -524,20 +656,45 @@ export default function Coordinator({
               }}
             >
               <tr>
-                <th style={{ width: "15%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)" }}>
-                  DCR ID
+                <th
+                  onClick={() => handleSortClick("dcrId")}
+                  className="sortable-th"
+                  style={{ width: "15%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)" }}
+                  title="Click to sort by DCR ID"
+                >
+                  DCR ID {renderSortIndicator("dcrId")}
                 </th>
-                <th style={{ width: "14%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
-                  Date Submitted
+                <th
+                  onClick={() => handleSortClick("dateSubmitted")}
+                  className="sortable-th"
+                  style={{ width: "15%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  title="Click to sort by Date Submitted"
+                >
+                  Date Submitted {renderSortIndicator("dateSubmitted")}
                 </th>
-                <th style={{ width: "11%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
-                  Node #
+                <th
+                  onClick={() => handleSortClick("nodeNum")}
+                  className="sortable-th"
+                  style={{ width: "11%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  title="Click to sort by Node #"
+                >
+                  Node # {renderSortIndicator("nodeNum")}
                 </th>
-                <th style={{ width: "13%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
-                  Region
+                <th
+                  onClick={() => handleSortClick("region")}
+                  className="sortable-th"
+                  style={{ width: "13%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  title="Click to sort by Region"
+                >
+                  Region {renderSortIndicator("region")}
                 </th>
-                <th style={{ width: "18%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
-                  Contractor
+                <th
+                  onClick={() => handleSortClick("contractor")}
+                  className="sortable-th"
+                  style={{ width: "17%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  title="Click to sort by Contractor"
+                >
+                  Contractor {renderSortIndicator("contractor")}
                 </th>
                 <th style={{ width: "19%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
                   Status (Col AG)
@@ -710,6 +867,7 @@ export default function Coordinator({
               style={{ marginLeft: "10px", padding: "4px 8px" }}
             >
               <option value={15}>Show 15</option>
+              <option value={25}>Show 25</option>
               <option value={50}>Show 50</option>
               <option value={100}>Show 100</option>
             </select>

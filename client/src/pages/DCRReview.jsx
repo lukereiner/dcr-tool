@@ -307,9 +307,6 @@ export default function DCRReview({
         <button onClick={() => navigate("/coordinator")} className="btn-secondary">
           ← Back to All Records
         </button>
-        <span style={{ fontSize: "13px", color: "var(--text-subtle)" }}>
-          Sheet Row #{dcrData.sheetRowNumber}
-        </span>
       </div>
 
       {/* Header Banner */}
@@ -324,7 +321,7 @@ export default function DCRReview({
       >
         <h1 style={{ margin: 0, fontSize: "24px" }}>{dcrId}</h1>
         <p style={{ margin: "4px 0 0 0", opacity: 0.9, fontSize: "14px" }}>
-          Cable Replacement Review & Operational Workspace
+          Sheet Row #{dcrData.sheetRowNumber}
         </p>
       </div>
 
