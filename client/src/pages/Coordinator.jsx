@@ -1,8 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "../context/ToastContext";
 
-const STATUS_OPTIONS = [
+
+const DEFAULT_STATUSES = [
   "Pre Construction",
   "Permitting in Process",
   "Under Construction",
@@ -10,6 +11,7 @@ const STATUS_OPTIONS = [
   "Completed",
   "Canceled",
 ];
+
 
 // Theme-adaptive status styling with fallback borders
 const STATUS_COLORS = {
@@ -57,6 +59,7 @@ const STATUS_COLORS = {
   },
 };
 
+
 export default function Coordinator({
   sheetData,
   onRefresh,
@@ -68,22 +71,65 @@ export default function Coordinator({
   const navigate = useNavigate();
   const { showToast } = useToast();
 
-  // Use dynamic statuses from Google Sheets validation tab
+
+  // Use dynamic statuses & technicians from Google Sheets validation tab
   const statusOptions = useMemo(() => {
     if (dropdownOptions?.AG && dropdownOptions.AG.length > 0) {
       return dropdownOptions.AG;
     }
-    return STATUS_OPTIONS;
+    return DEFAULT_STATUSES;
   }, [dropdownOptions]);
+
+
+  const techOptions = useMemo(() => {
+    if (dropdownOptions?.AE && dropdownOptions.AE.length > 0) {
+      return dropdownOptions.AE;
+    }
+    return [];
+  }, [dropdownOptions]);
+
 
   const [selectedStatus, setSelectedStatus] = useState("Under Construction");
   const [updatingRow, setUpdatingRow] = useState(null);
+  
+  // Persistent technician filter state
+  const [selectedTech, setSelectedTech] = useState(() => {
+    return localStorage.getItem("coordinator_tech") || "All";
+  });
+
+
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+  const saved = localStorage.getItem("coordinator_page_size");
+  return saved ? Number(saved) : 15;
+});
+
+
+  // Sync technician selection to local storage and reset page when it changes
+  useEffect(() => {
+    localStorage.setItem("coordinator_tech", selectedTech);
+    setPage(1);
+  }, [selectedTech]);
+
+
+  // Reset page when switching status
+  useEffect(() => {
+    setPage(1);
+  }, [selectedStatus]);
+
+  useEffect(() => {
+  localStorage.setItem("coordinator_page_size", String(pageSize));
+}, [pageSize]);
+
 
   const rows = useMemo(() => {
     if (!sheetData || sheetData.length < 2) return [];
     return sheetData.slice(1);
   }, [sheetData]);
 
+
+  // KPIs now filter based on the selected technician
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -91,9 +137,18 @@ export default function Coordinator({
     let completed = 0;
     const contractorCounts = {};
 
+
     rows.forEach((row) => {
+      const tech = String(row[30] || "").trim(); // Col AE
       const status = String(row[32] || "").trim(); // Col AG
       const contractor = String(row[34] || "").trim(); // Col AI
+
+
+      // Skip row if a specific tech is selected and it doesn't match
+      if (selectedTech !== "All" && tech !== selectedTech) {
+        return;
+      }
+
 
       if (status && status !== "Completed" && status !== "Canceled") {
         totalActive++;
@@ -102,10 +157,12 @@ export default function Coordinator({
       if (status === "Pre Construction") preConstruction++;
       if (status === "Completed") completed++;
 
+
       if (contractor) {
         contractorCounts[contractor] = (contractorCounts[contractor] || 0) + 1;
       }
     });
+
 
     return {
       totalActive,
@@ -114,16 +171,25 @@ export default function Coordinator({
       completed,
       contractorCounts,
     };
-  }, [rows]);
+  }, [rows, selectedTech]);
 
+
+  // Filter rows by Status AND Technician
   const filteredRows = useMemo(() => {
     const matches = [];
 
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const status = String(row[32] || "").trim();
+      const tech = String(row[30] || "").trim(); // Col AE
+      const status = String(row[32] || "").trim(); // Col AG
 
-      if (status.toLowerCase() === selectedStatus.toLowerCase()) {
+
+      const statusMatch = status.toLowerCase() === selectedStatus.toLowerCase();
+      const techMatch = selectedTech === "All" || tech === selectedTech;
+
+
+      if (statusMatch && techMatch) {
         matches.push({
           row,
           sheetRowNumber: i + 2,
@@ -131,17 +197,29 @@ export default function Coordinator({
       }
     }
 
+
     matches.sort((a, b) => {
       const dateA = new Date(a.row[2] || 0);
       const dateB = new Date(b.row[2] || 0);
-      return dateB - dateA;
+      return dateB - dateA; // Descending (newest first)
     });
 
-    return matches.slice(0, 10);
-  }, [rows, selectedStatus]);
+
+    return matches; // Uncapped matches
+  }, [rows, selectedStatus, selectedTech]);
+
+
+  // Pagination Logic
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPageRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [filteredRows, page, pageSize]);
+
 
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
     setUpdatingRow(sheetRowNumber);
+
 
     try {
       const res = await fetch("/api/sheet/cell", {
@@ -157,12 +235,14 @@ export default function Coordinator({
         }),
       });
 
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
+
       showToast(
         `Row ${sheetRowNumber} status updated to "${newStatus}"`,
-        "success",
+        "success"
       );
       if (onStatusUpdated) {
         onStatusUpdated(sheetRowNumber, 32, newStatus);
@@ -174,45 +254,46 @@ export default function Coordinator({
     }
   };
 
+
   return (
     <div style={{ maxWidth: "1280px", margin: "0 auto" }}>
       <style>{`
         /* Dynamic Theme helpers for Status Filter Pills and Dropdowns */
-.status-pill {
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  border: 2px solid var(--border-color);
-  background: var(--bg-card);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.status-pill:hover {
-  background: var(--bg-card-subtle);
-  color: var(--text-main);
-}
-.status-pill.active {
-  border-color: var(--btn-primary-bg);
-}
+        .status-pill {
+          padding: 6px 14px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+          border: 2px solid var(--border-color);
+          background: var(--bg-card);
+          color: var(--text-muted);
+          white-space: nowrap;
+        }
+        .status-pill:hover {
+          background: var(--bg-card-subtle);
+          color: var(--text-main);
+        }
+        .status-pill.active {
+          border-color: var(--btn-primary-bg);
+        }
 
 
-/* Light Theme Active Pill */
-:root .status-pill.active {
-  background: #e8f0fe;
-  color: #1a73e8;
-  border-color: #1a73e8;
-}
+        /* Light Theme Active Pill */
+        :root .status-pill.active {
+          background: #e8f0fe;
+          color: #1a73e8;
+          border-color: #1a73e8;
+        }
 
 
-/* Dark Theme Active Pill */
-[data-theme='dark'] .status-pill.active {
-  background: #1e293b;
-  color: #60a5fa;
-  border-color: #3b82f6;
-}
+        /* Dark Theme Active Pill */
+        [data-theme='dark'] .status-pill.active {
+          background: #1e293b;
+          color: #60a5fa;
+          border-color: #3b82f6;
+        }
 
 
         /* Table Row Styling */
@@ -242,6 +323,7 @@ export default function Coordinator({
           border: 1px solid #3f4756;
         }
       `}</style>
+
 
       {/* KPI Cards Header */}
       <div
@@ -292,6 +374,7 @@ export default function Coordinator({
           </div>
         </div>
 
+
         <div
           style={{
             background: "var(--bg-card)",
@@ -332,6 +415,7 @@ export default function Coordinator({
           </div>
         </div>
 
+
         <div
           style={{
             background: "var(--bg-card)",
@@ -371,6 +455,7 @@ export default function Coordinator({
             Awaiting mobilization
           </div>
         </div>
+
 
         <div
           style={{
@@ -413,14 +498,15 @@ export default function Coordinator({
         </div>
       </div>
 
+
       {/* Main Focus Section */}
       <div
         style={{
           background: "var(--bg-card)",
           border: "1px solid var(--border-color)",
           borderRadius: "8px",
-          padding: "20px",
           boxShadow: "var(--shadow-card)",
+          overflow: "hidden",
         }}
       >
         <div
@@ -428,9 +514,9 @@ export default function Coordinator({
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: "18px",
+            padding: "20px",
             flexWrap: "wrap",
-            gap: "12px",
+            gap: "16px",
           }}
         >
           {/* Status Filter Toggle Pills */}
@@ -448,21 +534,42 @@ export default function Coordinator({
               );
             })}
           </div>
+
+
+          {/* Technician Dropdown Filter */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>
+              Technician:
+            </label>
+            <select
+              value={selectedTech}
+              onChange={(e) => setSelectedTech(e.target.value)}
+              className="dcr-select"
+              style={{ minWidth: "200px" }}
+            >
+              <option value="All">All Technicians</option>
+              {techOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
+
 
         {/* Focus Table */}
         <div
           style={{
             overflowX: "auto",
-            border: "1px solid var(--border-color)",
-            borderRadius: "6px",
+            borderTop: "1px solid var(--border-color)",
             background: "var(--bg-card)",
           }}
         >
           <table
             style={{
               width: "100%",
-              tableLayout: "fixed", // Enforces fixed column geometry
+              tableLayout: "fixed",
               borderCollapse: "collapse",
               fontSize: "13px",
               textAlign: "left",
@@ -478,7 +585,7 @@ export default function Coordinator({
                 <th
                   style={{
                     width: "15%",
-                    padding: "10px 12px",
+                    padding: "10px 16px",
                     fontWeight: 600,
                     color: "var(--text-main)",
                   }}
@@ -538,7 +645,7 @@ export default function Coordinator({
                 <th
                   style={{
                     width: "10%",
-                    padding: "10px 12px",
+                    padding: "10px 16px",
                     fontWeight: 600,
                     color: "var(--text-main)",
                     textAlign: "center",
@@ -549,23 +656,25 @@ export default function Coordinator({
               </tr>
             </thead>
             <tbody>
-              {filteredRows.length === 0 ? (
+              {currentPageRows.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
                     style={{
-                      padding: "28px",
+                      padding: "40px",
                       textAlign: "center",
                       color: "var(--text-subtle)",
                     }}
                   >
                     {loading
                       ? "Loading records..."
-                      : `No records found with status "${selectedStatus}".`}
+                      : `No records found for ${
+                          selectedTech !== "All" ? `technician "${selectedTech}"` : "any technician"
+                        } in status "${selectedStatus}".`}
                   </td>
                 </tr>
               ) : (
-                filteredRows.map(({ row, sheetRowNumber }) => {
+                currentPageRows.map(({ row, sheetRowNumber }) => {
                   const dcrId = row[24] || "—";
                   const dateSub = row[2] || "—";
                   const nodeNum = row[12] || "—";
@@ -573,9 +682,9 @@ export default function Coordinator({
                   const contractor = row[34] || "—";
                   const currentStatus = String(row[32] || "").trim();
                   const isDark =
-                    document.documentElement.getAttribute("data-theme") ===
-                    "dark";
+                    document.documentElement.getAttribute("data-theme") === "dark";
                   const badgeTheme = STATUS_COLORS[currentStatus];
+
 
                   const badgeBg = isDark
                     ? badgeTheme?.bgDark || "var(--bg-card-subtle)"
@@ -584,9 +693,10 @@ export default function Coordinator({
                     ? badgeTheme?.textDark || "var(--text-main)"
                     : badgeTheme?.textLight || "#202124";
 
+
                   return (
                     <tr key={sheetRowNumber} className="dcr-table-row">
-                      <td style={{ padding: "10px 12px", fontWeight: 600 }}>
+                      <td style={{ padding: "10px 16px", fontWeight: 600 }}>
                         <button
                           onClick={() =>
                             navigate(`/dcr/${encodeURIComponent(dcrId)}`)
@@ -665,7 +775,7 @@ export default function Coordinator({
                           ))}
                         </select>
                       </td>
-                      <td style={{ padding: "10px 12px", textAlign: "center" }}>
+                      <td style={{ padding: "10px 16px", textAlign: "center" }}>
                         <button
                           onClick={() =>
                             navigate(`/dcr/${encodeURIComponent(dcrId)}`)
@@ -687,24 +797,60 @@ export default function Coordinator({
           </table>
         </div>
 
-        {/* Footer Link to Full Spreadsheet */}
+
+        {/* Pagination Controls */}
         <div
           style={{
-            marginTop: "18px",
             display: "flex",
-            justifyContent: "flex-end",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 18px",
+            borderTop: "1px solid var(--border-color)",
+            background: "var(--bg-card-subtle)",
+            fontSize: "13px",
+            color: "var(--text-muted)",
           }}
         >
-          <button
-            onClick={() => navigate("/data")}
-            className="btn-primary"
-            style={{
-              padding: "8px 18px",
-              fontSize: "13px",
-            }}
-          >
-            View Full Spreadsheet ({rows.length} rows) →
-          </button>
+          <div>
+            Showing{" "}
+            {filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1}
+            –{Math.min(page * pageSize, filteredRows.length)} of{" "}
+            {filteredRows.length} rows
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="btn-secondary"
+              style={{ padding: "5px 12px" }}
+            >
+              Previous
+            </button>
+            <span style={{ color: "var(--text-main)" }}>
+              Page <strong>{page}</strong> of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages || totalPages === 0}
+              className="btn-secondary"
+              style={{ padding: "5px 12px" }}
+            >
+              Next
+            </button>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              className="dcr-select"
+              style={{ marginLeft: "10px", padding: "4px 8px" }}
+            >
+              <option value={15}>Show 15</option>
+              <option value={50}>Show 50</option>
+              <option value={100}>Show 100</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
