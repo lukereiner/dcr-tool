@@ -463,7 +463,7 @@ export default function DCRReview({ onRecordUpdated }) {
                 {/* Bottom-pinned Value Block */}
                 <div style={{ marginTop: "auto" }}>
                   {isLong && !isExpanded ? (
-                    /* Collapsed: 2-line max with '... More ▼' anchored on line 2 */
+                    /* Collapsed: 2-line max with 'More ▼' anchored on line 2 */
                     <div
                       style={{
                         position: "relative",
@@ -500,7 +500,7 @@ export default function DCRReview({ onRecordUpdated }) {
                           lineHeight: "1.4",
                         }}
                       >
-                        ... More ▼
+                        More ▼
                       </button>
                     </div>
                   ) : (
