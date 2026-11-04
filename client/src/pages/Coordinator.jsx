@@ -57,7 +57,7 @@ const STATUS_COLORS = {
   },
 };
 
-export default function Dashboard({
+export default function Coordinator({
   sheetData,
   onRefresh,
   loading,
@@ -638,27 +638,32 @@ export default function Dashboard({
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <select
-  value={currentStatus}
-  disabled={updatingRow === sheetRowNumber}
-  onChange={(e) => handleStatusChange(sheetRowNumber, e.target.value)}
-  className="status-select-badge"
-  style={{
-    width: '100%',
-    maxWidth: '175px',
-    background: badgeBg,
-    color: badgeText,
-  }}
->
-  {/* If row has an existing status no longer in options, preserve it */}
-  {currentStatus && !statusOptions.includes(currentStatus) && (
-    <option value={currentStatus}>{currentStatus}</option>
-  )}
-  {statusOptions.map((opt) => (
-    <option key={opt} value={opt}>
-      {opt}
-    </option>
-  ))}
-</select>
+                          value={currentStatus}
+                          disabled={updatingRow === sheetRowNumber}
+                          onChange={(e) =>
+                            handleStatusChange(sheetRowNumber, e.target.value)
+                          }
+                          className="status-select-badge"
+                          style={{
+                            width: "100%",
+                            maxWidth: "175px",
+                            background: badgeBg,
+                            color: badgeText,
+                          }}
+                        >
+                          {/* If row has an existing status no longer in options, preserve it */}
+                          {currentStatus &&
+                            !statusOptions.includes(currentStatus) && (
+                              <option value={currentStatus}>
+                                {currentStatus}
+                              </option>
+                            )}
+                          {statusOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
                         <button

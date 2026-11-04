@@ -49,7 +49,10 @@ const DROPDOWN_FIELD_OPTIONS = {
   AL: ["Yes", "No"],
 };
 
-export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdownOptions }) {
+export default function DCRReview({
+  onRecordUpdated,
+  dropdownOptions: propDropdownOptions,
+}) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
   const { accessToken, logout, refreshSignal } = useContext(AuthContext);
@@ -59,7 +62,9 @@ export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdo
   const [loading, setLoading] = useState(true);
   const [formValues, setFormValues] = useState({});
   const [savingField, setSavingField] = useState(null);
-  const [dynamicDropdowns, setDynamicDropdowns] = useState(propDropdownOptions || {});
+  const [dynamicDropdowns, setDynamicDropdowns] = useState(
+    propDropdownOptions || {},
+  );
 
   // Track expanded state for Section 2 spec cards
   const [expandedFields, setExpandedFields] = useState({});
@@ -96,8 +101,8 @@ export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdo
 
       setDcrData(data);
       if (data.dropdownOptions) {
-    setDynamicDropdowns(data.dropdownOptions);
-  }
+        setDynamicDropdowns(data.dropdownOptions);
+      }
       const initialInputs = {};
       data.fields.forEach((f) => {
         initialInputs[f.colLetter] = f.value;
@@ -219,7 +224,7 @@ export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdo
     return (
       <div style={{ padding: "30px" }}>
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/coordinator")}
           className="btn-secondary"
           style={{ marginBottom: "16px" }}
         >
@@ -299,7 +304,7 @@ export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdo
           marginBottom: "20px",
         }}
       >
-        <button onClick={() => navigate("/")} className="btn-secondary">
+        <button onClick={() => navigate("/coordinator")} className="btn-secondary">
           ← Back to All Records
         </button>
         <span style={{ fontSize: "13px", color: "var(--text-subtle)" }}>
@@ -789,74 +794,100 @@ export default function DCRReview({ onRecordUpdated, dropdownOptions: propDropdo
             }}
           >
             {postSpecsFields.map((f) => {
-  const isSaving = savingField === f.colLetter;
+              const isSaving = savingField === f.colLetter;
 
+              // Resolve options: dynamic response -> app prop -> default fallback
+              const rawOptions =
+                dynamicDropdowns[f.colLetter] &&
+                dynamicDropdowns[f.colLetter].length > 0
+                  ? dynamicDropdowns[f.colLetter]
+                  : propDropdownOptions &&
+                      propDropdownOptions[f.colLetter] &&
+                      propDropdownOptions[f.colLetter].length > 0
+                    ? propDropdownOptions[f.colLetter]
+                    : DROPDOWN_FIELD_OPTIONS[f.colLetter];
 
-  // Resolve options: dynamic response -> app prop -> default fallback
-  const rawOptions =
-    (dynamicDropdowns[f.colLetter] && dynamicDropdowns[f.colLetter].length > 0)
-      ? dynamicDropdowns[f.colLetter]
-      : (propDropdownOptions && propDropdownOptions[f.colLetter] && propDropdownOptions[f.colLetter].length > 0)
-      ? propDropdownOptions[f.colLetter]
-      : DROPDOWN_FIELD_OPTIONS[f.colLetter];
+              const currentValue = formValues[f.colLetter] ?? "";
 
+              // If options exist, guarantee any historical saved value is preserved as an option
+              let dropdownOptions = null;
+              if (rawOptions && rawOptions.length > 0) {
+                dropdownOptions = [...rawOptions];
+                if (currentValue && !dropdownOptions.includes(currentValue)) {
+                  dropdownOptions.unshift(currentValue);
+                }
+              }
 
-  const currentValue = formValues[f.colLetter] ?? '';
+              return (
+                <div
+                  key={f.colLetter}
+                  style={{
+                    background: "var(--bg-card-subtle)",
+                    padding: "12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border-subtle)",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "block",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      marginBottom: "6px",
+                      color: "var(--text-main)",
+                    }}
+                  >
+                    {f.header} ({f.colLetter})
+                  </label>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    {dropdownOptions ? (
+                      <select
+                        className="dcr-select"
+                        value={currentValue}
+                        onChange={(e) =>
+                          setFormValues({
+                            ...formValues,
+                            [f.colLetter]: e.target.value,
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">- Select -</option>
+                        {dropdownOptions.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        className="dcr-input"
+                        value={currentValue}
+                        onChange={(e) =>
+                          setFormValues({
+                            ...formValues,
+                            [f.colLetter]: e.target.value,
+                          })
+                        }
+                        style={{ flex: 1 }}
+                      />
+                    )}
 
-
-  // If options exist, guarantee any historical saved value is preserved as an option
-  let dropdownOptions = null;
-  if (rawOptions && rawOptions.length > 0) {
-    dropdownOptions = [...rawOptions];
-    if (currentValue && !dropdownOptions.includes(currentValue)) {
-      dropdownOptions.unshift(currentValue);
-    }
-  }
-
-
-  return (
-    <div key={f.colLetter} style={{ background: 'var(--bg-card-subtle)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-      <label style={{ display: 'block', fontWeight: 600, fontSize: '13px', marginBottom: '6px', color: 'var(--text-main)' }}>
-        {f.header} ({f.colLetter})
-      </label>
-      <div style={{ display: 'flex', gap: '8px' }}>
-        {dropdownOptions ? (
-          <select
-            className="dcr-select"
-            value={currentValue}
-            onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
-            style={{ flex: 1 }}
-          >
-            <option value="">- Select -</option>
-            {dropdownOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type="text"
-            className="dcr-input"
-            value={currentValue}
-            onChange={(e) => setFormValues({ ...formValues, [f.colLetter]: e.target.value })}
-            style={{ flex: 1 }}
-          />
-        )}
-
-
-        <button
-          onClick={() => handleSaveField(f.colLetter, f.header, f.colIndex)}
-          disabled={isSaving}
-          className="btn-primary"
-          style={{ minWidth: '72px' }}
-        >
-          {isSaving ? <ButtonSpinner /> : 'Save'}
-        </button>
-      </div>
-    </div>
-  );
-})}
+                    <button
+                      onClick={() =>
+                        handleSaveField(f.colLetter, f.header, f.colIndex)
+                      }
+                      disabled={isSaving}
+                      className="btn-primary"
+                      style={{ minWidth: "72px" }}
+                    >
+                      {isSaving ? <ButtonSpinner /> : "Save"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
