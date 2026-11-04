@@ -10,6 +10,30 @@ import { ToastProvider, useToast } from './context/ToastContext';
 
 export const AuthContext = createContext(null);
 
+const DEFAULT_DROPDOWN_OPTIONS = {
+  Z: ['Approved', 'Denied'],
+  AE: [
+    'Dante Hawkins',
+    'David Firewick',
+    'Jason Jones',
+    'James Naumann',
+    'Larry Burruel',
+    'Jose Diaz',
+    'Roy Ray',
+    'Steve McGraw',
+    'Jeremy Borreson',
+  ],
+  AG: [
+    'Pre Construction',
+    'Permitting in Process',
+    'Under Construction',
+    'Maintenance Tie',
+    'Completed',
+    'Canceled',
+  ],
+  AL: ['Yes', 'No'],
+};
+
 
 // Login View
 function LoginView({ onLoginSuccess, sessionExpired }) {
@@ -187,6 +211,8 @@ function AppContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
+  // dropdowns in data val (cable replacment sheet)
+const [dropdownOptions, setDropdownOptions] = useState(DEFAULT_DROPDOWN_OPTIONS);
 
   const logout = (dueToExpiry = false) => {
     sessionStorage.removeItem('dcr_access_token');
@@ -202,34 +228,29 @@ function AppContent() {
   };
 
 
-  const fetchSheet = async (forceRefresh = false) => {
+const fetchSheet = async (forceRefresh = false) => {
     if (!accessToken) return;
     setLoading(true);
     try {
-      const isForce = forceRefresh === true;
-      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${isForce ? '&refresh=true' : ''}`;
+      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${forceRefresh ? '&refresh=true' : ''}`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-
-
       if (res.status === 401) {
         logout(true);
         return;
       }
-
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
 
       setSheetData(data.values || []);
-      if (isForce) {
-        showToast(`Refreshed ${tabName} data successfully`, 'success');
+      // Overwrite with live dynamic options from Data Val (Cable Replacement)
+      if (data.dropdownOptions) {
+        setDropdownOptions(data.dropdownOptions);
       }
     } catch (err) {
-      console.error(err);
-      showToast(`Fetch error: ${err.message}`, 'error');
+      showToast(`Failed to load sheet: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -253,17 +274,20 @@ const handleGlobalRefresh = (forceRefresh = true) => {
     }
   };
 
+  const handleStatusUpdated = (sheetRowNumber, colIndex, newValue) => {
+  setSheetData((prevData) => {
+    if (!prevData || prevData.length <= sheetRowNumber - 1) return prevData;
+    const updated = prevData.map((row) => [...row]);
+    if (updated[sheetRowNumber - 1]) {
+      updated[sheetRowNumber - 1][colIndex] = newValue;
+    }
+    return updated;
+  });
+};
 
-  const handleRecordUpdated = (sheetRowNumber, colIndex, newValue) => {
-    setSheetData((prev) => {
-      if (!prev || prev.length < sheetRowNumber) return prev;
-      const next = prev.map((r) => [...r]);
-      if (next[sheetRowNumber - 1]) {
-        next[sheetRowNumber - 1][colIndex] = newValue;
-      }
-      return next;
-    });
-  };
+const handleRecordUpdated = (sheetRowNumber, colIndex, newValue) => {
+  handleStatusUpdated(sheetRowNumber, colIndex, newValue);
+};
 
   // Manage Theme State
 const [theme, setTheme] = useState(() => {
@@ -305,10 +329,11 @@ const toggleTheme = () => {
                   element={
                     <Dashboard
                       sheetData={sheetData}
-                      onRefresh={fetchSheet}
-                      loading={loading}
-                      accessToken={accessToken}
-                      onStatusUpdated={handleRecordUpdated}
+                      onRefresh={handleGlobalRefresh}
+        loading={loading}
+        accessToken={accessToken}
+        onStatusUpdated={handleStatusUpdated}
+        dropdownOptions={dropdownOptions}
                     />
                   }
                 />
@@ -333,7 +358,8 @@ const toggleTheme = () => {
                 />
                 <Route
                   path="/dcr/:dcrId"
-                  element={<DCRReview onRecordUpdated={handleRecordUpdated} />}
+                  element={<DCRReview onRecordUpdated={handleRecordUpdated}
+        dropdownOptions={dropdownOptions} />}
                 />
                 <Route
                   path="/qc"

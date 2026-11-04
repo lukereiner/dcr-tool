@@ -63,9 +63,19 @@ export default function Dashboard({
   loading,
   accessToken,
   onStatusUpdated,
+  dropdownOptions = {},
 }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
+
+  // Use dynamic statuses from Google Sheets validation tab
+  const statusOptions = useMemo(() => {
+    if (dropdownOptions?.AG && dropdownOptions.AG.length > 0) {
+      return dropdownOptions.AG;
+    }
+    return STATUS_OPTIONS;
+  }, [dropdownOptions]);
+
   const [selectedStatus, setSelectedStatus] = useState("Under Construction");
   const [updatingRow, setUpdatingRow] = useState(null);
 
@@ -425,7 +435,7 @@ export default function Dashboard({
         >
           {/* Status Filter Toggle Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {STATUS_OPTIONS.map((status) => {
+            {statusOptions.map((status) => {
               const active = selectedStatus === status;
               return (
                 <button
@@ -628,25 +638,27 @@ export default function Dashboard({
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <select
-                          value={currentStatus}
-                          disabled={updatingRow === sheetRowNumber}
-                          onChange={(e) =>
-                            handleStatusChange(sheetRowNumber, e.target.value)
-                          }
-                          className="status-select-badge"
-                          style={{
-                            width: "100%",
-                            maxWidth: "175px",
-                            background: badgeBg,
-                            color: badgeText,
-                          }}
-                        >
-                          {STATUS_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
+  value={currentStatus}
+  disabled={updatingRow === sheetRowNumber}
+  onChange={(e) => handleStatusChange(sheetRowNumber, e.target.value)}
+  className="status-select-badge"
+  style={{
+    width: '100%',
+    maxWidth: '175px',
+    background: badgeBg,
+    color: badgeText,
+  }}
+>
+  {/* If row has an existing status no longer in options, preserve it */}
+  {currentStatus && !statusOptions.includes(currentStatus) && (
+    <option value={currentStatus}>{currentStatus}</option>
+  )}
+  {statusOptions.map((opt) => (
+    <option key={opt} value={opt}>
+      {opt}
+    </option>
+  ))}
+</select>
                       </td>
                       <td style={{ padding: "10px 12px", textAlign: "center" }}>
                         <button

@@ -31,6 +31,7 @@ app.use(express.json());
 
 
 const SPREADSHEET_ID = '1EP2pkQZm2E1u_ZCqDFNCoS0xie5IfSdlJ-wpPmNCboo';
+const DATA_VAL_TAB = 'Data Val (Cable Replacement)';
 
 
 const getSheetsClient = (authHeader) => {
@@ -66,9 +67,55 @@ function getColLetter(index) {
 }
 
 
-// Centralized fetch helper with cache lock and force-refresh support
-async function getOrFetchSheet(sheets, tabName, forceRefresh = false) {
-  const cacheKey = `sheet_${tabName}`;
+// Helper to convert validation sheet rows into key-value options dictionary
+// Helper to convert validation sheet rows into key-value options dictionary
+function parseValidationRows(valRows) {
+  const optionsMap = {
+    Z: [],
+    AE: [],
+    AG: [],
+    AL: [],
+  };
+
+
+  if (!valRows || valRows.length < 2) return optionsMap;
+
+
+  const headers = valRows[0] || [];
+  const colLetterMapping = {};
+
+
+  headers.forEach((header, colIdx) => {
+    // Match all parentheses groups and pick the LAST one to avoid "(s)" in "Technician(s) (AE)"
+    const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
+    if (matches.length > 0) {
+      const colLetter = matches[matches.length - 1][1].toUpperCase();
+      colLetterMapping[colIdx] = colLetter;
+      if (!optionsMap[colLetter]) {
+        optionsMap[colLetter] = [];
+      }
+    }
+  });
+
+
+  for (let r = 1; r < valRows.length; r++) {
+    const row = valRows[r];
+    Object.entries(colLetterMapping).forEach(([colIdx, colLetter]) => {
+      const val = row[colIdx] ? String(row[colIdx]).trim() : '';
+      if (val && !optionsMap[colLetter].includes(val)) {
+        optionsMap[colLetter].push(val);
+      }
+    });
+  }
+
+
+  return optionsMap;
+}
+
+
+// Centralized fetch helper with single-call batchGet for data + validation options
+async function getOrFetchSheetWithValidation(sheets, tabName, forceRefresh = false) {
+  const cacheKey = `sheet_bundle_${tabName}`;
 
 
   if (forceRefresh) {
@@ -83,23 +130,33 @@ async function getOrFetchSheet(sheets, tabName, forceRefresh = false) {
   }
 
 
-  // If another request is already fetching this tab right now, wait and reuse it
   if (pendingRequests.has(cacheKey)) {
     console.log(`[IN-FLIGHT REUSE] Waiting on pending fetch for ${tabName}`);
     return pendingRequests.get(cacheKey);
   }
 
 
-  console.log(`[CACHE MISS] Fetching fresh ${tabName} from Google Sheets API...`);
+  console.log(`[CACHE MISS] Batch-fetching fresh ${tabName} & ${DATA_VAL_TAB}...`);
   const fetchPromise = (async () => {
     try {
-      const response = await sheets.spreadsheets.values.get({
+      // Single API call retrieving both the target tab and the validation tab together
+      const response = await sheets.spreadsheets.values.batchGet({
         spreadsheetId: SPREADSHEET_ID,
-        range: `'${tabName}'!A1:ZZ`,
+        ranges: [`'${tabName}'!A1:ZZ`, `'${DATA_VAL_TAB}'!A1:Z`],
       });
-      const values = response.data.values || [];
-      cache.set(cacheKey, values);
-      return values;
+
+
+      const valueRanges = response.data.valueRanges || [];
+      const values = valueRanges[0]?.values || [];
+      const valRows = valueRanges[1]?.values || [];
+
+
+      const dropdownOptions = parseValidationRows(valRows);
+      const bundle = { values, dropdownOptions };
+
+
+      cache.set(cacheKey, bundle);
+      return bundle;
     } finally {
       pendingRequests.delete(cacheKey);
     }
@@ -123,8 +180,8 @@ app.get('/api/sheet', async (req, res) => {
     const sheets = getSheetsClient(req.headers.authorization);
 
 
-    const values = await getOrFetchSheet(sheets, tabName, forceRefresh);
-    res.json({ values });
+    const { values, dropdownOptions } = await getOrFetchSheetWithValidation(sheets, tabName, forceRefresh);
+    res.json({ values, dropdownOptions });
   } catch (error) {
     console.error('Error fetching sheet:', error?.response?.data || error.message);
     const status = error?.response?.status || 500;
@@ -154,7 +211,7 @@ app.post('/api/sheet/cell', async (req, res) => {
     });
 
 
-    cache.del(`sheet_${tabName}`);
+    cache.del(`sheet_bundle_${tabName}`);
     console.log(`[CACHE INVALIDATED] Cleared cache for ${tabName} due to update at ${cell}`);
 
 
@@ -181,8 +238,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     const sheets = getSheetsClient(req.headers.authorization);
 
 
-    // Routes through central getOrFetchSheet (checks cache first!)
-    const rows = await getOrFetchSheet(sheets, 'Cable Replacement', forceRefresh);
+    const { values: rows, dropdownOptions } = await getOrFetchSheetWithValidation(sheets, 'Cable Replacement', forceRefresh);
 
 
     if (rows.length === 0) {
@@ -226,6 +282,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
       dcrId,
       sheetRowNumber,
       fields,
+      dropdownOptions,
     });
   } catch (error) {
     console.error('Error fetching DCR details:', error?.response?.data || error.message);
@@ -260,7 +317,7 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
 
 
     const sheets = getSheetsClient(req.headers.authorization);
-    const rows = await getOrFetchSheet(sheets, 'Cable Replacement', false);
+    const { values: rows } = await getOrFetchSheetWithValidation(sheets, 'Cable Replacement', false);
     const DCR_COL_INDEX = 24;
 
 
@@ -291,7 +348,7 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
     });
 
 
-    cache.del('sheet_Cable Replacement');
+    cache.del('sheet_bundle_Cable Replacement');
     console.log(`[CACHE INVALIDATED] Cleared Cable Replacement cache after updating ${targetCell} for DCR ${dcrId}`);
 
 
