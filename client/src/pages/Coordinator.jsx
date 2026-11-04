@@ -212,12 +212,13 @@ export default function Coordinator({
   }, [sheetData]);
 
 
-  // KPIs scoped by selected technician
+// KPIs scoped by selected technician
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
     let preConstruction = 0;
     let completed = 0;
+    let unassigned = 0;
     const contractorCounts = {};
 
 
@@ -225,10 +226,17 @@ export default function Coordinator({
       const tech = String(row[30] || "").trim(); // Col AE
       const status = String(row[32] || "").trim(); // Col AG
       const contractor = String(row[34] || "").trim(); // Col AI
+      const dcrId = String(row[24] || "").trim(); // Col Y
 
 
       if (selectedTech !== "All" && tech !== selectedTech) {
         return;
+      }
+
+
+      // Check for unassigned: has DCR ID but no status
+      if (dcrId && dcrId !== "—" && !status) {
+        unassigned++;
       }
 
 
@@ -251,6 +259,7 @@ export default function Coordinator({
       underConstruction,
       preConstruction,
       completed,
+      unassigned,
       contractorCounts,
     };
   }, [rows, selectedTech]);
@@ -503,7 +512,7 @@ export default function Coordinator({
             {kpis.totalActive}
           </div>
           <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
-            Excludes completed & canceled
+            Excl. completed & canceled
           </div>
         </div>
 
@@ -524,7 +533,7 @@ export default function Coordinator({
             {kpis.underConstruction}
           </div>
           <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
-            Active field work
+            Actively building
           </div>
         </div>
 
@@ -545,7 +554,7 @@ export default function Coordinator({
             {kpis.preConstruction}
           </div>
           <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
-            Awaiting mobilization
+            Awaiting construction
           </div>
         </div>
 
@@ -566,7 +575,27 @@ export default function Coordinator({
             {kpis.completed}
           </div>
           <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
-            Finished DCR records
+            Finished builds
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "8px",
+            padding: "16px 20px",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+            Unassigned
+          </div>
+          <div style={{ fontSize: "28px", fontWeight: 700, color: "#ef4444", marginTop: "6px" }}>
+            {kpis.unassigned}
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+            Has DCR ID, no status
           </div>
         </div>
       </div>
