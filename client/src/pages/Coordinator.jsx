@@ -50,12 +50,19 @@ const STATUS_COLORS = {
     textDark: "#86efac",
     borderDark: "#166534",
   },
-  Canceled: {
-    bgLight: "#fad2cf",
-    textLight: "#a50e0e",
-    bgDark: "#370c0c",
-    textDark: "#fca5a5",
-    borderDark: "#991b1b",
+Canceled: {
+    bgLight: "#f1e5e5",
+    textLight: "#7f1d1d",
+    bgDark: "#231819",
+    textDark: "#d1a3a4",
+    borderDark: "#4a2a2b",
+  },
+  Unassigned: {
+    bgLight: "#fee2e2",
+    textLight: "#dc2626",
+    bgDark: "#450a0a",
+    textDark: "#ff6b6b",
+    borderDark: "#ef4444",
   },
 };
 
@@ -273,13 +280,35 @@ export default function Coordinator({
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const dcrId = String(row[24] || "").trim(); // Col Y
       const tech = String(row[30] || "").trim(); // Col AE
       const status = String(row[32] || "").trim(); // Col AG
 
 
-      const statusMatch =
-        !hasStatusFilter ||
-        selectedStatuses.some((s) => s.toLowerCase() === status.toLowerCase());
+      // Exclude rows without a valid DCR ID
+      if (!dcrId || dcrId === "—") continue;
+
+
+      const isRowUnassigned = !status;
+
+
+      let statusMatch = false;
+      if (!hasStatusFilter) {
+        // Show all: includes assigned and unassigned
+        statusMatch = true;
+      } else {
+        // Multi-select check
+        const matchSelectedAssigned = selectedStatuses.some(
+          (s) => s.toLowerCase() === status.toLowerCase()
+        );
+        const matchSelectedUnassigned =
+          selectedStatuses.includes("Unassigned") && isRowUnassigned;
+
+
+        statusMatch = matchSelectedAssigned || matchSelectedUnassigned;
+      }
+
+
       const techMatch = selectedTech === "All" || tech === selectedTech;
 
 
@@ -341,6 +370,7 @@ export default function Coordinator({
 
 
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
+    if (!newStatus || newStatus === "Unassigned") return; // Guard against writing "Unassigned" to sheets
     setUpdatingRow(sheetRowNumber);
 
 
@@ -623,20 +653,20 @@ export default function Coordinator({
         >
           {/* Status Multi-Select Toggle Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {statusOptions.map((status) => {
-              const active = selectedStatuses.includes(status);
-              return (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => toggleStatus(status)}
-                  className={`status-pill ${active ? "active" : ""}`}
-                >
-                  {status}
-                </button>
-              );
-            })}
-          </div>
+  {[...statusOptions, "Unassigned"].map((status) => {
+    const active = selectedStatuses.includes(status);
+    return (
+      <button
+        key={status}
+        type="button"
+        onClick={() => toggleStatus(status)}
+        className={`status-pill ${active ? "active" : ""}`}
+      >
+        {status}
+      </button>
+    );
+  })}
+</div>
 
 
           {/* Technician Dropdown Filter */}
@@ -757,9 +787,10 @@ export default function Coordinator({
                   const region = row[5] || "—";
                   const contractor = row[34] || "—";
                   const currentStatus = String(row[32] || "").trim();
+const displayStatus = currentStatus || "Unassigned";
+const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
                   const isDark =
                     document.documentElement.getAttribute("data-theme") === "dark";
-                  const badgeTheme = STATUS_COLORS[currentStatus];
 
 
                   const badgeBg = isDark
@@ -803,28 +834,28 @@ export default function Coordinator({
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <select
-                          value={currentStatus}
-                          disabled={updatingRow === sheetRowNumber}
-                          onChange={(e) =>
-                            handleStatusChange(sheetRowNumber, e.target.value)
-                          }
-                          className="status-select-badge"
-                          style={{
-                            width: "100%",
-                            maxWidth: "175px",
-                            background: badgeBg,
-                            color: badgeText,
-                          }}
-                        >
-                          {currentStatus && !statusOptions.includes(currentStatus) && (
-                            <option value={currentStatus}>{currentStatus}</option>
-                          )}
-                          {statusOptions.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                        </select>
+  value={currentStatus || ""}
+  disabled={updatingRow === sheetRowNumber}
+  onChange={(e) => handleStatusChange(sheetRowNumber, e.target.value)}
+  className="status-select-badge"
+  style={{
+    width: "100%",
+    maxWidth: "175px",
+    background: badgeBg,
+    color: badgeText,
+  }}
+>
+  {!currentStatus && (
+    <option value="" disabled>
+      Unassigned
+    </option>
+  )}
+  {statusOptions.map((opt) => (
+    <option key={opt} value={opt}>
+      {opt}
+    </option>
+  ))}
+</select>
                       </td>
                       <td style={{ padding: "10px 16px", textAlign: "center" }}>
                         <button
