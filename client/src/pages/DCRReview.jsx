@@ -49,6 +49,58 @@ const DROPDOWN_FIELD_OPTIONS = {
   AL: ["Yes", "No"],
 };
 
+// --- Helper: Format file type badge & icon ---
+function getFileBadge(mimeType, name) {
+  if (mimeType?.startsWith("image/")) {
+    return {
+      label: "IMG",
+      bg: "#e0f2fe",
+      text: "#0369a1",
+      darkBg: "#082f49",
+      darkText: "#7dd3fc",
+    };
+  }
+  if (mimeType?.includes("pdf") || name?.endsWith(".pdf")) {
+    return {
+      label: "PDF",
+      bg: "#fee2e2",
+      text: "#b91c1c",
+      darkBg: "#450a0a",
+      darkText: "#fca5a5",
+    };
+  }
+  if (
+    mimeType?.includes("sheet") ||
+    mimeType?.includes("excel") ||
+    name?.endsWith(".xlsx") ||
+    name?.endsWith(".csv")
+  ) {
+    return {
+      label: "SHEET",
+      bg: "#dcfce7",
+      text: "#15803d",
+      darkBg: "#052e16",
+      darkText: "#86efac",
+    };
+  }
+  if (name?.endsWith(".dwg") || name?.endsWith(".dxf")) {
+    return {
+      label: "CAD",
+      bg: "#fef3c7",
+      text: "#b45309",
+      darkBg: "#451a03",
+      darkText: "#fcd34d",
+    };
+  }
+  return {
+    label: "FILE",
+    bg: "#f3f4f6",
+    text: "#4b5563",
+    darkBg: "#1f2937",
+    darkText: "#9ca3af",
+  };
+}
+
 export default function DCRReview({
   onRecordUpdated,
   dropdownOptions: propDropdownOptions,
@@ -70,10 +122,19 @@ export default function DCRReview({
   const [expandedFields, setExpandedFields] = useState({});
 
   const [photos, setPhotos] = useState([]);
+  const [folderFiles, setFolderFiles] = useState([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [photosLoading, setPhotosLoading] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [folderUrl, setFolderUrl] = useState("");
+
+  const [driveViewMode, setDriveViewMode] = useState(() => {
+    return localStorage.getItem("dcr_drive_view_mode") || "photos";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("dcr_drive_view_mode", driveViewMode);
+  }, [driveViewMode]);
 
   const toggleFieldExpand = (colLetter) => {
     setExpandedFields((prev) => ({
@@ -143,16 +204,21 @@ export default function DCRReview({
   const fetchFolderPhotos = async (folderId) => {
     setPhotosLoading(true);
     try {
-      const res = await fetch(`/api/drive/folder/${folderId}/images`, {
+      const res = await fetch(`/api/drive/folder/${folderId}/files`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       const data = await res.json();
-      if (res.ok && data.files) {
-        setPhotos(data.files);
+      if (res.ok) {
+        const allFiles = data.files || [];
+        const imgFiles =
+          data.images ||
+          allFiles.filter((f) => f.mimeType?.startsWith("image/"));
+        setFolderFiles(allFiles);
+        setPhotos(imgFiles);
         setActivePhotoIndex(0);
       }
     } catch (err) {
-      console.error("Failed to load folder images:", err);
+      console.error("Failed to load folder files:", err);
     } finally {
       setPhotosLoading(false);
     }
@@ -304,7 +370,10 @@ export default function DCRReview({
           marginBottom: "20px",
         }}
       >
-        <button onClick={() => navigate("/coordinator")} className="btn-secondary">
+        <button
+          onClick={() => navigate("/coordinator")}
+          className="btn-secondary"
+        >
           ← Back to All Records
         </button>
       </div>
@@ -551,7 +620,7 @@ export default function DCRReview({
         </div>
       </div>
 
-      {/* Section 3: Dedicated Inspection Photo Carousel */}
+      {/* Section 3: Media & Drive Folder Explorer */}
       <div
         style={{
           background: "var(--bg-card)",
@@ -562,6 +631,7 @@ export default function DCRReview({
           boxShadow: "var(--shadow-card)",
         }}
       >
+        {/* Header with Sliding Toggle */}
         <div
           style={{
             display: "flex",
@@ -572,17 +642,60 @@ export default function DCRReview({
             gap: "10px",
           }}
         >
-          <div>
-            <h3
-              style={{ margin: 0, fontSize: "16px", color: "var(--text-main)" }}
+          {/* Sliding Toggle: Photos vs Files */}
+          <div
+            style={{
+              display: "inline-flex",
+              background: "var(--bg-card-subtle)",
+              padding: "3px",
+              borderRadius: "24px",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setDriveViewMode("photos")}
+              style={{
+                border: "none",
+                outline: "none",
+                cursor: "pointer",
+                padding: "6px 18px",
+                borderRadius: "20px",
+                fontSize: "13px",
+                fontWeight: 600,
+                transition: "all 0.2s ease",
+                background:
+                  driveViewMode === "photos"
+                    ? "var(--btn-primary-bg)"
+                    : "transparent",
+                color:
+                  driveViewMode === "photos" ? "#ffffff" : "var(--text-muted)",
+              }}
             >
-              Inspection Photos (Cols U, V, W)
-            </h3>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-              {photos.length > 0
-                ? `${photos.length} photos loaded from submitted folder`
-                : "Drive Folder Inspection Gallery"}
-            </span>
+              Photos {photos.length > 0 && `(${photos.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDriveViewMode("files")}
+              style={{
+                border: "none",
+                outline: "none",
+                cursor: "pointer",
+                padding: "6px 18px",
+                borderRadius: "20px",
+                fontSize: "13px",
+                fontWeight: 600,
+                transition: "all 0.2s ease",
+                background:
+                  driveViewMode === "files"
+                    ? "var(--btn-primary-bg)"
+                    : "transparent",
+                color:
+                  driveViewMode === "files" ? "#ffffff" : "var(--text-muted)",
+              }}
+            >
+              Files {folderFiles.length > 0 && `(${folderFiles.length})`}
+            </button>
           </div>
 
           {folderUrl && (
@@ -613,9 +726,158 @@ export default function DCRReview({
               borderRadius: "6px",
             }}
           >
-            Scanning Drive folder for inspection photos...
+            Loading folder contents from Google Drive...
           </div>
-        ) : photos.length === 0 ? (
+        ) : driveViewMode === "photos" ? (
+          /* ================= PHOTOS VIEW ================= */
+          photos.length === 0 ? (
+            <div
+              style={{
+                padding: "30px",
+                textAlign: "center",
+                color: "var(--text-subtle)",
+                background: "var(--bg-card-subtle)",
+                borderRadius: "6px",
+              }}
+            >
+              {folderUrl
+                ? "No photo files found in this folder."
+                : "No photo folder attached to this DCR."}
+            </div>
+          ) : (
+            <div>
+              <div
+                style={{
+                  position: "relative",
+                  background: "#0a0a0a",
+                  borderRadius: "8px",
+                  height: "460px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
+                }}
+              >
+                <button
+                  onClick={() =>
+                    setActivePhotoIndex((prev) =>
+                      prev > 0 ? prev - 1 : photos.length - 1,
+                    )
+                  }
+                  style={{
+                    position: "absolute",
+                    left: "16px",
+                    zIndex: 2,
+                    background: "rgba(0,0,0,0.6)",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: "40px",
+                    height: "40px",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                  }}
+                >
+                  ◀
+                </button>
+
+                <img
+                  src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
+                  alt={activePhoto.name}
+                  onClick={() => setLightboxOpen(true)}
+                  style={{
+                    maxHeight: "100%",
+                    maxWidth: "100%",
+                    objectFit: "contain",
+                    cursor: "zoom-in",
+                  }}
+                  title="Click to view full screen"
+                />
+
+                <button
+                  onClick={() =>
+                    setActivePhotoIndex((prev) =>
+                      prev < photos.length - 1 ? prev + 1 : 0,
+                    )
+                  }
+                  style={{
+                    position: "absolute",
+                    right: "16px",
+                    zIndex: 2,
+                    background: "rgba(0,0,0,0.6)",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "50%",
+                    width: "40px",
+                    height: "40px",
+                    cursor: "pointer",
+                    fontSize: "18px",
+                  }}
+                >
+                  ▶
+                </button>
+
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "12px",
+                    background: "rgba(0,0,0,0.75)",
+                    color: "#ffffff",
+                    padding: "4px 14px",
+                    borderRadius: "16px",
+                    fontSize: "12px",
+                    zIndex: 2,
+                    pointerEvents: "none",
+                  }}
+                >
+                  {activePhoto.name} ({activePhotoIndex + 1} of {photos.length})
+                </div>
+              </div>
+
+              {/* Thumbnails */}
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  overflowX: "auto",
+                  marginTop: "12px",
+                  paddingBottom: "6px",
+                }}
+              >
+                {photos.map((photo, idx) => (
+                  <div
+                    key={photo.id}
+                    onClick={() => setActivePhotoIndex(idx)}
+                    style={{
+                      flexShrink: 0,
+                      width: "80px",
+                      height: "60px",
+                      borderRadius: "4px",
+                      overflow: "hidden",
+                      cursor: "pointer",
+                      border:
+                        idx === activePhotoIndex
+                          ? "2px solid var(--btn-primary-bg)"
+                          : "1px solid var(--border-color)",
+                      opacity: idx === activePhotoIndex ? 1 : 0.6,
+                    }}
+                  >
+                    <img
+                      src={`/api/drive/file/${photo.id}?token=${encodeURIComponent(accessToken)}`}
+                      alt={photo.name}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        ) : /* ================= FILES VIEW ================= */
+        folderFiles.length === 0 ? (
           <div
             style={{
               padding: "30px",
@@ -625,143 +887,152 @@ export default function DCRReview({
               borderRadius: "6px",
             }}
           >
-            {folderUrl
-              ? "No image files detected in this folder link."
-              : "No photo folder attached to this DCR."}
+            No files found in this Google Drive folder.
           </div>
         ) : (
-          <div>
-            <div
+          <div
+            style={{
+              maxHeight: "460px",
+              overflowY: "auto",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: "6px",
+            }}
+          >
+            <table
               style={{
-                position: "relative",
-                background: "#0a0a0a",
-                borderRadius: "8px",
-                height: "460px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "13px",
+                textAlign: "left",
               }}
             >
-              <button
-                onClick={() =>
-                  setActivePhotoIndex((prev) =>
-                    prev > 0 ? prev - 1 : photos.length - 1,
-                  )
-                }
+              <thead
                 style={{
-                  position: "absolute",
-                  left: "16px",
-                  zIndex: 2,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: "40px",
-                  height: "40px",
-                  cursor: "pointer",
-                  fontSize: "18px",
+                  background: "var(--bg-card-subtle)",
+                  borderBottom: "1px solid var(--border-color)",
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
                 }}
               >
-                ◀
-              </button>
-
-              <img
-                src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
-                alt={activePhoto.name}
-                onClick={() => setLightboxOpen(true)}
-                style={{
-                  maxHeight: "100%",
-                  maxWidth: "100%",
-                  objectFit: "contain",
-                  cursor: "zoom-in",
-                }}
-                title="Click to view full screen"
-              />
-
-              <button
-                onClick={() =>
-                  setActivePhotoIndex((prev) =>
-                    prev < photos.length - 1 ? prev + 1 : 0,
-                  )
-                }
-                style={{
-                  position: "absolute",
-                  right: "16px",
-                  zIndex: 2,
-                  background: "rgba(0,0,0,0.6)",
-                  color: "#ffffff",
-                  border: "none",
-                  borderRadius: "50%",
-                  width: "40px",
-                  height: "40px",
-                  cursor: "pointer",
-                  fontSize: "18px",
-                }}
-              >
-                ▶
-              </button>
-
-              <div
-                style={{
-                  position: "absolute",
-                  bottom: "12px",
-                  background: "rgba(0,0,0,0.75)",
-                  color: "#ffffff",
-                  padding: "4px 14px",
-                  borderRadius: "16px",
-                  fontSize: "12px",
-                  zIndex: 2,
-                  pointerEvents: "none",
-                }}
-              >
-                {activePhoto.name} ({activePhotoIndex + 1} of {photos.length})
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                overflowX: "auto",
-                marginTop: "12px",
-                paddingBottom: "6px",
-              }}
-            >
-              {photos.map((photo, idx) => (
-                <div
-                  key={photo.id}
-                  onClick={() => setActivePhotoIndex(idx)}
-                  style={{
-                    flexShrink: 0,
-                    width: "80px",
-                    height: "60px",
-                    borderRadius: "4px",
-                    overflow: "hidden",
-                    cursor: "pointer",
-                    border:
-                      idx === activePhotoIndex
-                        ? "2px solid var(--btn-primary-bg)"
-                        : "1px solid var(--border-color)",
-                    opacity: idx === activePhotoIndex ? 1 : 0.6,
-                  }}
-                >
-                  <img
-                    src={`/api/drive/file/${photo.id}?token=${encodeURIComponent(accessToken)}`}
-                    alt={photo.name}
+                <tr>
+                  <th style={{ padding: "10px 14px", width: "80px" }}>Type</th>
+                  <th style={{ padding: "10px 14px" }}>File Name</th>
+                  <th
                     style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
+                      padding: "10px 14px",
+                      width: "210px",
+                      textAlign: "right",
                     }}
-                  />
-                </div>
-              ))}
-            </div>
+                  >
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {folderFiles.map((file) => {
+                  const badge = getFileBadge(file.mimeType, file.name);
+                  const isDark =
+                    document.documentElement.getAttribute("data-theme") ===
+                    "dark";
+                  const isImg = file.mimeType?.startsWith("image/");
+
+                  return (
+                    <tr
+                      key={file.id}
+                      className="dcr-table-row"
+                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                    >
+                      <td style={{ padding: "10px 14px" }}>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            borderRadius: "4px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            background: isDark ? badge.darkBg : badge.bg,
+                            color: isDark ? badge.darkText : badge.text,
+                          }}
+                        >
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 14px",
+                          fontWeight: 500,
+                          color: "var(--text-main)",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {file.name}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 14px",
+                          textAlign: "right",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "8px",
+                          }}
+                        >
+                          {isImg && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const photoIdx = photos.findIndex(
+                                  (p) => p.id === file.id,
+                                );
+                                if (photoIdx !== -1)
+                                  setActivePhotoIndex(photoIdx);
+                                setDriveViewMode("photos");
+                              }}
+                              className="btn-secondary"
+                              style={{
+                                padding: "4px 10px",
+                                fontSize: "12px",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              View Photo
+                            </button>
+                          )}
+                          <a
+                            href={
+                              file.webViewLink ||
+                              `https://drive.google.com/file/d/${file.id}/view`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-secondary"
+                            style={{
+                              padding: "4px 10px",
+                              fontSize: "12px",
+                              textDecoration: "none",
+                              whiteSpace: "nowrap",
+                              display: "inline-flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            Open ↗
+                          </a>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
-
       {/* Section 4: Post-Spec Processing Fields */}
       {postSpecsFields.length > 0 && (
         <div

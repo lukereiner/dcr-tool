@@ -372,28 +372,41 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 
-app.get('/api/drive/folder/:folderId/images', async (req, res) => {
+app.get("/api/drive/folder/:folderId/files", async (req, res) => {
   try {
     const { folderId } = req.params;
-    const drive = getDriveClient(req.headers.authorization);
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader && authHeader.split(" ")[1];
+
+
+    if (!accessToken) {
+      return res.status(401).json({ error: "Missing access token" });
+    }
+
+
+    const drive = google.drive({
+      version: "v3",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
 
     const response = await drive.files.list({
-      q: `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`,
-      fields: 'files(id, name, mimeType, webViewLink, thumbnailLink)',
-      pageSize: 50,
-      orderBy: 'name',
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: "files(id, name, mimeType, thumbnailLink, webViewLink, size, modifiedTime)",
+      pageSize: 100,
+      orderBy: "folder,name",
     });
 
 
     const files = response.data.files || [];
-    res.json({ files });
-  } catch (error) {
-    console.error('Error listing folder files:', error?.response?.data || error.message);
-    const status = error?.response?.status || 500;
-    res.status(status).json({
-      error: error?.response?.data?.error?.message || error.message,
-    });
+    // Helper to separate images from general files
+    const images = files.filter((f) => f.mimeType && f.mimeType.startsWith("image/"));
+
+
+    res.json({ files, images });
+  } catch (err) {
+    console.error("Error listing folder files:", err);
+    res.status(500).json({ error: err.message || "Failed to list folder files" });
   }
 });
 
