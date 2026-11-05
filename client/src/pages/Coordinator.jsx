@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "../context/ToastContext";
 
-
 const DEFAULT_STATUSES = [
   "Pre Construction",
   "Permitting in Process",
@@ -11,7 +10,6 @@ const DEFAULT_STATUSES = [
   "Completed",
   "Canceled",
 ];
-
 
 // Theme-adaptive status styling with fallback borders
 const STATUS_COLORS = {
@@ -50,12 +48,12 @@ const STATUS_COLORS = {
     textDark: "#86efac",
     borderDark: "#166534",
   },
-Canceled: {
-    bgLight: "#f1e5e5",
-    textLight: "#7f1d1d",
-    bgDark: "#231819",
-    textDark: "#d1a3a4",
-    borderDark: "#4a2a2b",
+  Canceled: {
+    bgLight: "#18181b",
+    textLight: "#f4f4f5",
+    bgDark: "#09090b",
+    textDark: "#a1a1aa",
+    borderDark: "#27272a",
   },
   Unassigned: {
     bgLight: "#fee2e2",
@@ -66,7 +64,6 @@ Canceled: {
   },
 };
 
-
 // Column index mapping for sorting
 const SORT_COLUMNS = {
   dcrId: { colIdx: 24, label: "DCR ID", isDate: false },
@@ -76,9 +73,7 @@ const SORT_COLUMNS = {
   contractor: { colIdx: 34, label: "Contractor", isDate: false },
 };
 
-
 const DEFAULT_SORT_CHAIN = [{ key: "dateSubmitted", direction: "desc" }];
-
 
 export default function Coordinator({
   sheetData,
@@ -91,7 +86,6 @@ export default function Coordinator({
   const navigate = useNavigate();
   const { showToast } = useToast();
 
-
   // Use dynamic statuses & technicians from Google Sheets validation tab
   const statusOptions = useMemo(() => {
     if (dropdownOptions?.AG && dropdownOptions.AG.length > 0) {
@@ -100,14 +94,12 @@ export default function Coordinator({
     return DEFAULT_STATUSES;
   }, [dropdownOptions]);
 
-
   const techOptions = useMemo(() => {
     if (dropdownOptions?.AE && dropdownOptions.AE.length > 0) {
       return dropdownOptions.AE;
     }
     return [];
   }, [dropdownOptions]);
-
 
   // Persistent multi-status selection (empty array = show all)
   const [selectedStatuses, setSelectedStatuses] = useState(() => {
@@ -119,22 +111,18 @@ export default function Coordinator({
     }
   });
 
-
   const [updatingRow, setUpdatingRow] = useState(null);
-
 
   // Persistent technician filter
   const [selectedTech, setSelectedTech] = useState(() => {
     return localStorage.getItem("coordinator_tech") || "All";
   });
 
-
   // Persistent page size (defaults to 15)
   const [pageSize, setPageSize] = useState(() => {
     const saved = localStorage.getItem("coordinator_page_size");
     return saved ? Number(saved) : 15;
   });
-
 
   // Persistent multi-column sort chain
   const [sortChain, setSortChain] = useState(() => {
@@ -146,71 +134,68 @@ export default function Coordinator({
     }
   });
 
-
   const [page, setPage] = useState(1);
-
 
   // Sync state changes to localStorage and reset page
   useEffect(() => {
-    localStorage.setItem("coordinator_selected_statuses", JSON.stringify(selectedStatuses));
+    localStorage.setItem(
+      "coordinator_selected_statuses",
+      JSON.stringify(selectedStatuses),
+    );
     setPage(1);
   }, [selectedStatuses]);
-
 
   useEffect(() => {
     localStorage.setItem("coordinator_tech", selectedTech);
     setPage(1);
   }, [selectedTech]);
 
-
   useEffect(() => {
     localStorage.setItem("coordinator_page_size", String(pageSize));
     setPage(1);
   }, [pageSize]);
-
 
   useEffect(() => {
     localStorage.setItem("coordinator_sort_chain", JSON.stringify(sortChain));
     setPage(1);
   }, [sortChain]);
 
-
   // Toggle status selection on pill click
   const toggleStatus = (status) => {
     setSelectedStatuses((prev) =>
-      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+      prev.includes(status)
+        ? prev.filter((s) => s !== status)
+        : [...prev, status],
     );
   };
 
-
-// Uniform 3-state cycle for every column:
+  // Uniform 3-state cycle for every column:
   // [None] -> [asc] -> [desc] -> [None]
   const handleSortClick = (columnKey) => {
     setSortChain((prevChain) => {
-      const existingIndex = prevChain.findIndex((item) => item.key === columnKey);
-
+      const existingIndex = prevChain.findIndex(
+        (item) => item.key === columnKey,
+      );
 
       // State 1: Column is not currently active -> Set to 'asc' as primary
       if (existingIndex === -1) {
         return [{ key: columnKey, direction: "asc" }, ...prevChain];
       }
 
-
       const current = prevChain[existingIndex];
-
 
       // State 2: Currently 'asc' -> Move to 'desc'
       if (current.direction === "asc") {
-        const withoutCurrent = prevChain.filter((item) => item.key !== columnKey);
+        const withoutCurrent = prevChain.filter(
+          (item) => item.key !== columnKey,
+        );
         return [{ key: columnKey, direction: "desc" }, ...withoutCurrent];
       }
-
 
       // State 3: Currently 'desc' -> Remove completely (Unsorted / Natural)
       return prevChain.filter((item) => item.key !== columnKey);
     });
   };
-
 
   // Slice past header and subheader (starts on sheet row 3)
   const rows = useMemo(() => {
@@ -218,8 +203,7 @@ export default function Coordinator({
     return sheetData.slice(2);
   }, [sheetData]);
 
-
-// KPIs scoped by selected technician
+  // KPIs scoped by selected technician
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -228,24 +212,20 @@ export default function Coordinator({
     let unassigned = 0;
     const contractorCounts = {};
 
-
     rows.forEach((row) => {
       const tech = String(row[30] || "").trim(); // Col AE
       const status = String(row[32] || "").trim(); // Col AG
       const contractor = String(row[34] || "").trim(); // Col AI
       const dcrId = String(row[24] || "").trim(); // Col Y
 
-
       if (selectedTech !== "All" && tech !== selectedTech) {
         return;
       }
-
 
       // Check for unassigned: has DCR ID but no status
       if (dcrId && dcrId !== "—" && !status) {
         unassigned++;
       }
-
 
       if (status && status !== "Completed" && status !== "Canceled") {
         totalActive++;
@@ -254,12 +234,10 @@ export default function Coordinator({
       if (status === "Pre Construction") preConstruction++;
       if (status === "Completed") completed++;
 
-
       if (contractor) {
         contractorCounts[contractor] = (contractorCounts[contractor] || 0) + 1;
       }
     });
-
 
     return {
       totalActive,
@@ -271,12 +249,10 @@ export default function Coordinator({
     };
   }, [rows, selectedTech]);
 
-
   // Filter rows by multi-selected statuses AND technician, then multi-sort
   const filteredRows = useMemo(() => {
     const matches = [];
     const hasStatusFilter = selectedStatuses.length > 0;
-
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -284,13 +260,10 @@ export default function Coordinator({
       const tech = String(row[30] || "").trim(); // Col AE
       const status = String(row[32] || "").trim(); // Col AG
 
-
       // Exclude rows without a valid DCR ID
       if (!dcrId || dcrId === "—") continue;
 
-
       const isRowUnassigned = !status;
-
 
       let statusMatch = false;
       if (!hasStatusFilter) {
@@ -299,18 +272,15 @@ export default function Coordinator({
       } else {
         // Multi-select check
         const matchSelectedAssigned = selectedStatuses.some(
-          (s) => s.toLowerCase() === status.toLowerCase()
+          (s) => s.toLowerCase() === status.toLowerCase(),
         );
         const matchSelectedUnassigned =
           selectedStatuses.includes("Unassigned") && isRowUnassigned;
 
-
         statusMatch = matchSelectedAssigned || matchSelectedUnassigned;
       }
 
-
       const techMatch = selectedTech === "All" || tech === selectedTech;
-
 
       if (statusMatch && techMatch) {
         matches.push({
@@ -320,7 +290,6 @@ export default function Coordinator({
       }
     }
 
-
     // Only sort if there are active items in sortChain; otherwise keep natural sheet order
     if (sortChain.length > 0) {
       matches.sort((a, b) => {
@@ -328,13 +297,10 @@ export default function Coordinator({
           const config = SORT_COLUMNS[sortItem.key];
           if (!config) continue;
 
-
           const valA = a.row[config.colIdx] ?? "";
           const valB = b.row[config.colIdx] ?? "";
 
-
           let comparison = 0;
-
 
           if (config.isDate) {
             const timeA = new Date(valA || 0).getTime();
@@ -347,7 +313,6 @@ export default function Coordinator({
             });
           }
 
-
           if (comparison !== 0) {
             return sortItem.direction === "asc" ? comparison : -comparison;
           }
@@ -356,10 +321,8 @@ export default function Coordinator({
       });
     }
 
-
     return matches;
   }, [rows, selectedStatuses, selectedTech, sortChain]);
-
 
   // Pagination slice
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
@@ -368,11 +331,9 @@ export default function Coordinator({
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
 
-
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
     if (!newStatus || newStatus === "Unassigned") return; // Guard against writing "Unassigned" to sheets
     setUpdatingRow(sheetRowNumber);
-
 
     try {
       const res = await fetch("/api/sheet/cell", {
@@ -388,14 +349,12 @@ export default function Coordinator({
         }),
       });
 
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-
       showToast(
         `Row ${sheetRowNumber} status updated to "${newStatus}"`,
-        "success"
+        "success",
       );
       if (onStatusUpdated) {
         onStatusUpdated(sheetRowNumber, 32, newStatus);
@@ -406,7 +365,6 @@ export default function Coordinator({
       setUpdatingRow(null);
     }
   };
-
 
   // Helper to render sort arrows and priority badge in table headers
   const renderSortIndicator = (columnKey) => {
@@ -419,9 +377,7 @@ export default function Coordinator({
       );
     }
 
-
     const { direction } = sortChain[index];
-
 
     return (
       <span
@@ -439,7 +395,6 @@ export default function Coordinator({
       </span>
     );
   };
-
 
   return (
     <div style={{ maxWidth: "1280px", margin: "0 auto" }}>
@@ -516,7 +471,6 @@ export default function Coordinator({
         }
       `}</style>
 
-
       {/* KPI Cards Header */}
       <div
         style={{
@@ -535,18 +489,37 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
             Active Builds
           </div>
-          <div style={{ fontSize: "28px", fontWeight: 700, color: "#1a73e8", marginTop: "6px" }}>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: 700,
+              color: "#1a73e8",
+              marginTop: "6px",
+            }}
+          >
             {kpis.totalActive}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-subtle)",
+              marginTop: "4px",
+            }}
+          >
             Excl. completed & canceled
           </div>
         </div>
 
-
         <div
           style={{
             background: "var(--bg-card)",
@@ -556,18 +529,37 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
             Under Construction
           </div>
-          <div style={{ fontSize: "28px", fontWeight: 700, color: "#f59e0b", marginTop: "6px" }}>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: 700,
+              color: "#f59e0b",
+              marginTop: "6px",
+            }}
+          >
             {kpis.underConstruction}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-subtle)",
+              marginTop: "4px",
+            }}
+          >
             Actively building
           </div>
         </div>
 
-
         <div
           style={{
             background: "var(--bg-card)",
@@ -577,18 +569,37 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
             Pre Construction
           </div>
-          <div style={{ fontSize: "28px", fontWeight: 700, color: "var(--text-muted)", marginTop: "6px" }}>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: 700,
+              color: "var(--text-muted)",
+              marginTop: "6px",
+            }}
+          >
             {kpis.preConstruction}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-subtle)",
+              marginTop: "4px",
+            }}
+          >
             Awaiting construction
           </div>
         </div>
 
-
         <div
           style={{
             background: "var(--bg-card)",
@@ -598,13 +609,33 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
             Total Completed
           </div>
-          <div style={{ fontSize: "28px", fontWeight: 700, color: "#10b981", marginTop: "6px" }}>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: 700,
+              color: "#10b981",
+              marginTop: "6px",
+            }}
+          >
             {kpis.completed}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-subtle)",
+              marginTop: "4px",
+            }}
+          >
             Finished builds
           </div>
         </div>
@@ -618,18 +649,37 @@ export default function Coordinator({
             boxShadow: "var(--shadow-card)",
           }}
         >
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
             Unassigned
           </div>
-          <div style={{ fontSize: "28px", fontWeight: 700, color: "#ef4444", marginTop: "6px" }}>
+          <div
+            style={{
+              fontSize: "28px",
+              fontWeight: 700,
+              color: "#ef4444",
+              marginTop: "6px",
+            }}
+          >
             {kpis.unassigned}
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-subtle)", marginTop: "4px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-subtle)",
+              marginTop: "4px",
+            }}
+          >
             Has DCR ID, no status
           </div>
         </div>
       </div>
-
 
       {/* Main Focus Section */}
       <div
@@ -653,25 +703,30 @@ export default function Coordinator({
         >
           {/* Status Multi-Select Toggle Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-  {[...statusOptions, "Unassigned"].map((status) => {
-    const active = selectedStatuses.includes(status);
-    return (
-      <button
-        key={status}
-        type="button"
-        onClick={() => toggleStatus(status)}
-        className={`status-pill ${active ? "active" : ""}`}
-      >
-        {status}
-      </button>
-    );
-  })}
-</div>
-
+            {[...statusOptions, "Unassigned"].map((status) => {
+              const active = selectedStatuses.includes(status);
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => toggleStatus(status)}
+                  className={`status-pill ${active ? "active" : ""}`}
+                >
+                  {status}
+                </button>
+              );
+            })}
+          </div>
 
           {/* Technician Dropdown Filter */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-main)" }}>
+            <label
+              style={{
+                fontSize: "13px",
+                fontWeight: 600,
+                color: "var(--text-main)",
+              }}
+            >
               Technician:
             </label>
             <select
@@ -689,7 +744,6 @@ export default function Coordinator({
             </select>
           </div>
         </div>
-
 
         {/* Focus Table */}
         <div
@@ -718,7 +772,12 @@ export default function Coordinator({
                 <th
                   onClick={() => handleSortClick("dcrId")}
                   className="sortable-th"
-                  style={{ width: "15%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)" }}
+                  style={{
+                    width: "15%",
+                    padding: "10px 16px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
                   title="Click to sort by DCR ID"
                 >
                   DCR ID {renderSortIndicator("dcrId")}
@@ -726,7 +785,12 @@ export default function Coordinator({
                 <th
                   onClick={() => handleSortClick("dateSubmitted")}
                   className="sortable-th"
-                  style={{ width: "15%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  style={{
+                    width: "15%",
+                    padding: "10px 12px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
                   title="Click to sort by Date Submitted"
                 >
                   Date Submitted {renderSortIndicator("dateSubmitted")}
@@ -734,7 +798,12 @@ export default function Coordinator({
                 <th
                   onClick={() => handleSortClick("nodeNum")}
                   className="sortable-th"
-                  style={{ width: "11%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  style={{
+                    width: "11%",
+                    padding: "10px 12px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
                   title="Click to sort by Node #"
                 >
                   Node # {renderSortIndicator("nodeNum")}
@@ -742,7 +811,12 @@ export default function Coordinator({
                 <th
                   onClick={() => handleSortClick("region")}
                   className="sortable-th"
-                  style={{ width: "13%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  style={{
+                    width: "13%",
+                    padding: "10px 12px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
                   title="Click to sort by Region"
                 >
                   Region {renderSortIndicator("region")}
@@ -750,15 +824,35 @@ export default function Coordinator({
                 <th
                   onClick={() => handleSortClick("contractor")}
                   className="sortable-th"
-                  style={{ width: "17%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}
+                  style={{
+                    width: "17%",
+                    padding: "10px 12px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
                   title="Click to sort by Contractor"
                 >
                   Contractor {renderSortIndicator("contractor")}
                 </th>
-                <th style={{ width: "19%", padding: "10px 12px", fontWeight: 600, color: "var(--text-main)" }}>
+                <th
+                  style={{
+                    width: "19%",
+                    padding: "10px 12px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                  }}
+                >
                   Status (Col AG)
                 </th>
-                <th style={{ width: "10%", padding: "10px 16px", fontWeight: 600, color: "var(--text-main)", textAlign: "center" }}>
+                <th
+                  style={{
+                    width: "10%",
+                    padding: "10px 16px",
+                    fontWeight: 600,
+                    color: "var(--text-main)",
+                    textAlign: "center",
+                  }}
+                >
                   Action
                 </th>
               </tr>
@@ -787,11 +881,12 @@ export default function Coordinator({
                   const region = row[5] || "—";
                   const contractor = row[34] || "—";
                   const currentStatus = String(row[32] || "").trim();
-const displayStatus = currentStatus || "Unassigned";
-const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
+                  const displayStatus = currentStatus || "Unassigned";
+                  const badgeTheme =
+                    STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
                   const isDark =
-                    document.documentElement.getAttribute("data-theme") === "dark";
-
+                    document.documentElement.getAttribute("data-theme") ===
+                    "dark";
 
                   const badgeBg = isDark
                     ? badgeTheme?.bgDark || "var(--bg-card-subtle)"
@@ -799,7 +894,6 @@ const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
                   const badgeText = isDark
                     ? badgeTheme?.textDark || "var(--text-main)"
                     : badgeTheme?.textLight || "#202124";
-
 
                   return (
                     <tr key={sheetRowNumber} className="dcr-table-row">
@@ -820,42 +914,65 @@ const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
                           {dcrId} ↗
                         </button>
                       </td>
-                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          color: "var(--text-muted)",
+                        }}
+                      >
                         {dateSub}
                       </td>
-                      <td style={{ padding: "10px 12px", fontWeight: 500, color: "var(--text-main)" }}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          fontWeight: 500,
+                          color: "var(--text-main)",
+                        }}
+                      >
                         {nodeNum}
                       </td>
-                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          color: "var(--text-muted)",
+                        }}
+                      >
                         {region}
                       </td>
-                      <td style={{ padding: "10px 12px", color: "var(--text-muted)" }}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          color: "var(--text-muted)",
+                        }}
+                      >
                         {contractor}
                       </td>
                       <td style={{ padding: "10px 12px" }}>
                         <select
-  value={currentStatus || ""}
-  disabled={updatingRow === sheetRowNumber}
-  onChange={(e) => handleStatusChange(sheetRowNumber, e.target.value)}
-  className="status-select-badge"
-  style={{
-    width: "100%",
-    maxWidth: "175px",
-    background: badgeBg,
-    color: badgeText,
-  }}
->
-  {!currentStatus && (
-    <option value="" disabled>
-      Unassigned
-    </option>
-  )}
-  {statusOptions.map((opt) => (
-    <option key={opt} value={opt}>
-      {opt}
-    </option>
-  ))}
-</select>
+                          value={currentStatus || ""}
+                          disabled={updatingRow === sheetRowNumber}
+                          onChange={(e) =>
+                            handleStatusChange(sheetRowNumber, e.target.value)
+                          }
+                          className="status-select-badge"
+                          style={{
+                            width: "100%",
+                            maxWidth: "175px",
+                            background: badgeBg,
+                            color: badgeText,
+                          }}
+                        >
+                          {!currentStatus && (
+                            <option value="" disabled>
+                              Unassigned
+                            </option>
+                          )}
+                          {statusOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td style={{ padding: "10px 16px", textAlign: "center" }}>
                         <button
@@ -879,7 +996,6 @@ const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
           </table>
         </div>
 
-
         {/* Pagination Controls */}
         <div
           style={{
@@ -894,8 +1010,9 @@ const badgeTheme = STATUS_COLORS[displayStatus] || STATUS_COLORS["Unassigned"];
           }}
         >
           <div>
-            Showing {filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1}
-            –{Math.min(page * pageSize, filteredRows.length)} of {filteredRows.length} rows
+            Showing {filteredRows.length === 0 ? 0 : (page - 1) * pageSize + 1}–
+            {Math.min(page * pageSize, filteredRows.length)} of{" "}
+            {filteredRows.length} rows
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <button
