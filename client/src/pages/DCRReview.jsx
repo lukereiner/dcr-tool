@@ -84,7 +84,6 @@ function getFileBadge(mimeType, name) {
   };
 }
 
-// Inline Sub-component: Field Status Indicator
 function FieldIndicator({ status }) {
   if (!status || status === "idle" || status === "dirty") {
     return null;
@@ -157,7 +156,6 @@ function FieldIndicator({ status }) {
   );
 }
 
-// Inline Sub-component: Header Auto-Save Pill
 function AutoSaveHeaderStatus({ status, onRetry }) {
   const baseStyle = {
     display: "inline-flex",
@@ -167,99 +165,141 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
     fontWeight: 500,
     padding: "6px 14px",
     borderRadius: "20px",
-    background: "var(--bg-card)",
-    color: "var(--text-main)",
-    border: "1px solid var(--border-color)",
-    boxShadow: "var(--shadow-card, 0 1px 3px rgba(0, 0, 0, 0.05))",
     transition: "all 0.2s ease",
   };
 
 
-  if (status === "saving") {
-    return (
-      <div style={baseStyle}>
-        <span
+  return (
+    <>
+      <style>{`
+        /* Light mode default */
+        .autosave-pill {
+          background: var(--bg-card);
+          color: var(--text-main);
+          border: 1px solid var(--border-color);
+          box-shadow: var(--shadow-card, 0 1px 3px rgba(0, 0, 0, 0.05));
+        }
+        .autosave-pill .pill-text {
+          color: var(--text-muted);
+        }
+        .autosave-pill .check-icon {
+          color: #16a34a;
+        }
+        .autosave-pill .dirty-dot {
+          background: #eab308;
+          box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.2);
+        }
+
+
+        /* Dark mode brightness boost */
+        [data-theme='dark'] .autosave-pill {
+          background: #1e2530;
+          border: 1px solid #3b4554;
+          box-shadow: 0 0 8px rgba(0, 0, 0, 0.35);
+        }
+        [data-theme='dark'] .autosave-pill .pill-text {
+          color: #e2e8f0; /* Crisp bright gray/white text */
+        }
+        [data-theme='dark'] .autosave-pill .check-icon {
+          color: #4ade80; /* Vibrant neon green */
+        }
+        [data-theme='dark'] .autosave-pill .dirty-dot {
+          background: #facc15; /* Brighter glowing yellow */
+          box-shadow: 0 0 6px rgba(250, 204, 21, 0.5);
+        }
+        [data-theme='dark'] .autosave-pill-error {
+          background: rgba(239, 68, 68, 0.2) !important;
+          border-color: rgba(239, 68, 68, 0.6) !important;
+        }
+        [data-theme='dark'] .autosave-pill-error .error-text {
+          color: #fca5a5 !important;
+        }
+      `}</style>
+
+
+      {status === "saving" && (
+        <div className="autosave-pill" style={baseStyle}>
+          <span
+            style={{
+              display: "inline-block",
+              width: "12px",
+              height: "12px",
+              border: "2px solid rgba(96, 165, 250, 0.3)",
+              borderTop: "2px solid #60a5fa",
+              borderRadius: "50%",
+              animation: "btnSpin 0.7s linear infinite",
+            }}
+          />
+          <span className="pill-text">Saving changes...</span>
+        </div>
+      )}
+
+
+      {status === "dirty" && (
+        <div className="autosave-pill" style={baseStyle}>
+          <span
+            className="dirty-dot"
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              display: "inline-block",
+            }}
+          />
+          <span className="pill-text">Unsaved changes</span>
+        </div>
+      )}
+
+
+      {status === "error" && (
+        <div
+          className="autosave-pill autosave-pill-error"
           style={{
-            display: "inline-block",
-            width: "12px",
-            height: "12px",
-            border: "2px solid rgba(59, 130, 246, 0.25)",
-            borderTop: "2px solid var(--btn-primary-bg, #2563eb)",
-            borderRadius: "50%",
-            animation: "btnSpin 0.7s linear infinite",
-          }}
-        />
-        <span style={{ color: "var(--text-muted)" }}>Saving changes...</span>
-      </div>
-    );
-  }
-
-
-  if (status === "dirty") {
-    return (
-      <div style={baseStyle}>
-        <span
-          style={{
-            width: "8px",
-            height: "8px",
-            borderRadius: "50%",
-            background: "#eab308",
-            display: "inline-block",
-            boxShadow: "0 0 0 2px rgba(234, 179, 8, 0.2)",
-          }}
-        />
-        <span style={{ color: "var(--text-muted)" }}>Unsaved changes</span>
-      </div>
-    );
-  }
-
-
-  if (status === "error") {
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          background: "rgba(239, 68, 68, 0.1)",
-          borderColor: "rgba(239, 68, 68, 0.35)",
-        }}
-      >
-        <span style={{ color: "#ef4444", fontWeight: 600 }}>⚠️ Auto-save failed</span>
-        <button
-          type="button"
-          onClick={onRetry}
-          style={{
-            background: "#ef4444",
-            color: "#ffffff",
-            border: "none",
-            borderRadius: "4px",
-            padding: "2px 8px",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-            marginLeft: "2px",
+            ...baseStyle,
+            background: "rgba(239, 68, 68, 0.1)",
+            borderColor: "rgba(239, 68, 68, 0.35)",
           }}
         >
-          Retry
-        </button>
-      </div>
-    );
-  }
+          <span className="error-text" style={{ color: "#ef4444", fontWeight: 600 }}>
+            ⚠️ Auto-save failed
+          </span>
+          <button
+            type="button"
+            onClick={onRetry}
+            style={{
+              background: "#ef4444",
+              color: "#ffffff",
+              border: "none",
+              borderRadius: "4px",
+              padding: "2px 8px",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+              marginLeft: "2px",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
 
-  return (
-    <div style={baseStyle}>
-      <span
-        style={{
-          color: "#16a34a",
-          fontSize: "14px",
-          fontWeight: 700,
-          lineHeight: 1,
-        }}
-      >
-        ✓
-      </span>
-      <span style={{ color: "var(--text-muted)" }}>All changes saved</span>
-    </div>
+      {(status === "idle" || status === "saved" || !status) && (
+        <div className="autosave-pill" style={baseStyle}>
+          <span
+            className="check-icon"
+            style={{
+              fontSize: "14px",
+              fontWeight: 700,
+              lineHeight: 1,
+            }}
+          >
+            ✓
+          </span>
+          <span className="pill-text">All changes saved</span>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -269,7 +309,7 @@ export default function DCRReview({
 }) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
-  const { accessToken, logout, refreshSignal } = useContext(AuthContext);
+  const { accessToken, logout, refreshSignal, activeRegion } = useContext(AuthContext);
   const { showToast } = useToast();
 
   const [dcrData, setDcrData] = useState(null);
@@ -279,10 +319,9 @@ export default function DCRReview({
     propDropdownOptions || {},
   );
 
-  // Auto-Save States & Tracking
   const [dirtyFields, setDirtyFields] = useState(new Set());
   const [fieldStatuses, setFieldStatuses] = useState({});
-  const [globalStatus, setGlobalStatus] = useState("idle"); // 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+  const [globalStatus, setGlobalStatus] = useState("idle");
 
   const formValuesRef = useRef(formValues);
   formValuesRef.current = formValues;
@@ -294,10 +333,8 @@ export default function DCRReview({
   const fadeTimersRef = useRef({});
   const inFlightSnapshotRef = useRef(null);
 
-  // Section 2 card expansions
   const [expandedFields, setExpandedFields] = useState({});
 
-  // Media view states
   const [photos, setPhotos] = useState([]);
   const [folderFiles, setFolderFiles] = useState([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -320,7 +357,6 @@ export default function DCRReview({
     }));
   };
 
-  // Edge Case: Alert user if they close tab while changes are pending
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (dirtyFieldsRef.current.size > 0 || inFlightSnapshotRef.current !== null) {
@@ -333,7 +369,7 @@ export default function DCRReview({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  // Core Auto-Save Dispatcher
+  // Execute batch auto-save scoped to activeRegion
   const executeBatchSave = useCallback(async () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -343,7 +379,6 @@ export default function DCRReview({
     const currentDirty = dirtyFieldsRef.current;
     if (currentDirty.size === 0 || !dcrData) return;
 
-    // Snapshot unpersisted dirty fields
     const snapshot = {};
     currentDirty.forEach((colLetter) => {
       snapshot[colLetter] = formValuesRef.current[colLetter] ?? "";
@@ -352,7 +387,6 @@ export default function DCRReview({
     inFlightSnapshotRef.current = snapshot;
     setGlobalStatus("saving");
 
-    // Set field indicators to saving
     setFieldStatuses((prev) => {
       const next = { ...prev };
       currentDirty.forEach((colLetter) => {
@@ -368,7 +402,10 @@ export default function DCRReview({
           "Content-Type": "application/json",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ updates: snapshot }),
+        body: JSON.stringify({
+          updates: snapshot,
+          region: activeRegion?.id,
+        }),
       });
 
       if (res.status === 401) {
@@ -381,7 +418,6 @@ export default function DCRReview({
 
       setGlobalStatus("saved");
 
-      // Sync updated values to parent App state
       if (onRecordUpdated && dcrData.fields) {
         Object.entries(snapshot).forEach(([colLetter, val]) => {
           const fieldDef = dcrData.fields.find((f) => f.colLetter === colLetter);
@@ -391,7 +427,6 @@ export default function DCRReview({
         });
       }
 
-      // Race Condition Defense: compare snapshot with active local state
       setDirtyFields((prevDirty) => {
         const nextDirty = new Set(prevDirty);
         const resolvedCols = [];
@@ -403,7 +438,6 @@ export default function DCRReview({
           }
         });
 
-        // Trigger green checkmark with 2.5s auto-fade
         setFieldStatuses((prevStatuses) => {
           const nextStatuses = { ...prevStatuses };
 
@@ -427,7 +461,6 @@ export default function DCRReview({
           return nextStatuses;
         });
 
-        // If user typed in another field during network transit, re-queue debounce
         if (nextDirty.size > 0) {
           setGlobalStatus("dirty");
           debounceTimerRef.current = setTimeout(executeBatchSave, 3000);
@@ -450,9 +483,8 @@ export default function DCRReview({
     } finally {
       inFlightSnapshotRef.current = null;
     }
-  }, [dcrData, dcrId, accessToken, logout, onRecordUpdated, showToast]);
+  }, [dcrData, dcrId, accessToken, logout, onRecordUpdated, showToast, activeRegion?.id]);
 
-  // Edge Case: Auto-retry pending saves once network returns
   useEffect(() => {
     const handleOnline = () => {
       if (dirtyFieldsRef.current.size > 0) {
@@ -463,7 +495,6 @@ export default function DCRReview({
     return () => window.removeEventListener("online", handleOnline);
   }, [executeBatchSave]);
 
-  // Clean up timers on unmount
   useEffect(() => {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -471,22 +502,18 @@ export default function DCRReview({
     };
   }, []);
 
-  // Input change handler: clears indicator immediately and restarts 3s debounce
   const handleFieldChange = (colLetter, value) => {
-    // 1. Update local state
     setFormValues((prev) => ({
       ...prev,
       [colLetter]: value,
     }));
 
-    // 2. Mark dirty
     setDirtyFields((prev) => {
       const next = new Set(prev);
       next.add(colLetter);
       return next;
     });
 
-    // 3. Reset existing fade timers & clear visual status immediately
     if (fadeTimersRef.current[colLetter]) {
       clearTimeout(fadeTimersRef.current[colLetter]);
       delete fadeTimersRef.current[colLetter];
@@ -499,7 +526,6 @@ export default function DCRReview({
 
     setGlobalStatus("dirty");
 
-    // 4. Reset debounce timer (3 seconds)
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
@@ -509,10 +535,10 @@ export default function DCRReview({
   };
 
   const loadDcr = async (force = false) => {
-    if (!accessToken) return;
+    if (!accessToken || !activeRegion) return;
     setLoading(true);
     try {
-      const url = `/api/dcr/${encodeURIComponent(dcrId)}${force ? "?refresh=true" : ""}`;
+      const url = `/api/dcr/${encodeURIComponent(dcrId)}?region=${encodeURIComponent(activeRegion.id)}${force ? "&refresh=true" : ""}`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -595,8 +621,10 @@ export default function DCRReview({
   const lastSignalRef = React.useRef(refreshSignal);
 
   useEffect(() => {
-    loadDcr(false);
-  }, [dcrId, accessToken]);
+    if (activeRegion) {
+      loadDcr(false);
+    }
+  }, [dcrId, accessToken, activeRegion?.id]);
 
   useEffect(() => {
     if (refreshSignal > lastSignalRef.current) {
@@ -630,7 +658,7 @@ export default function DCRReview({
           ← Back to All Records
         </button>
         <p style={{ color: "#d93025" }}>
-          DCR record "{dcrId}" could not be found.
+          DCR record "{dcrId}" could not be found in {activeRegion?.name}.
         </p>
       </div>
     );
@@ -710,11 +738,10 @@ export default function DCRReview({
           ← Back to All Records
         </button>
 
-                  {/* Global Auto-Save Status */}
-          <AutoSaveHeaderStatus
-            status={globalStatus}
-            onRetry={executeBatchSave}
-          />
+        <AutoSaveHeaderStatus
+          status={globalStatus}
+          onRetry={executeBatchSave}
+        />
       </div>
 
       {/* Header Banner */}
@@ -735,14 +762,11 @@ export default function DCRReview({
         <div>
           <h1 style={{ margin: 0, fontSize: "24px" }}>{dcrId}</h1>
           <p style={{ margin: "4px 0 0 0", opacity: 0.9, fontSize: "14px" }}>
-            Sheet Row #{dcrData.sheetRowNumber}
+            {activeRegion?.name} • Sheet Row #{dcrData.sheetRowNumber}
           </p>
         </div>
 
         <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-
-
-          {/* External Google Forms Links */}
           <a
             href="https://forms.gle/Vq7dhmYNdWbYwbb46"
             target="_blank"
@@ -1044,7 +1068,7 @@ export default function DCRReview({
                   driveViewMode === "photos" ? "#ffffff" : "var(--text-muted)",
               }}
             >
-              Photos {/* photos.length > 0 && `(${photos.length})` */}
+              Photos
             </button>
             <button
               type="button"
@@ -1066,7 +1090,7 @@ export default function DCRReview({
                   driveViewMode === "files" ? "#ffffff" : "var(--text-muted)",
               }}
             >
-              Files {/* folderFiles.length > 0 && `(${folderFiles.length})` */}
+              Files
             </button>
           </div>
 

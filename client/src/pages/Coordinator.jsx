@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
+import { AuthContext } from "../App";
 import { useToast } from "../context/ToastContext";
 
 const DEFAULT_STATUSES = [
@@ -11,7 +12,6 @@ const DEFAULT_STATUSES = [
   "Canceled",
 ];
 
-// Theme-adaptive status styling with fallback borders
 const STATUS_COLORS = {
   "Pre Construction": {
     bgLight: "#e8eaed",
@@ -64,7 +64,6 @@ const STATUS_COLORS = {
   },
 };
 
-// Column index mapping for sorting
 const SORT_COLUMNS = {
   dcrId: { colIdx: 24, label: "DCR ID", isDate: false },
   dateSubmitted: { colIdx: 2, label: "Date Submitted", isDate: true },
@@ -85,8 +84,8 @@ export default function Coordinator({
 }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { activeRegion } = useContext(AuthContext);
 
-  // Use dynamic statuses & technicians from Google Sheets validation tab
   const statusOptions = useMemo(() => {
     if (dropdownOptions?.AG && dropdownOptions.AG.length > 0) {
       return dropdownOptions.AG;
@@ -101,7 +100,6 @@ export default function Coordinator({
     return [];
   }, [dropdownOptions]);
 
-  // Persistent multi-status selection (empty array = show all)
   const [selectedStatuses, setSelectedStatuses] = useState(() => {
     try {
       const saved = localStorage.getItem("coordinator_selected_statuses");
@@ -113,18 +111,15 @@ export default function Coordinator({
 
   const [updatingRow, setUpdatingRow] = useState(null);
 
-  // Persistent technician filter
   const [selectedTech, setSelectedTech] = useState(() => {
     return localStorage.getItem("coordinator_tech") || "All";
   });
 
-  // Persistent page size (defaults to 15)
   const [pageSize, setPageSize] = useState(() => {
     const saved = localStorage.getItem("coordinator_page_size");
     return saved ? Number(saved) : 15;
   });
 
-  // Persistent multi-column sort chain
   const [sortChain, setSortChain] = useState(() => {
     try {
       const saved = localStorage.getItem("coordinator_sort_chain");
@@ -136,7 +131,6 @@ export default function Coordinator({
 
   const [page, setPage] = useState(1);
 
-  // Sync state changes to localStorage and reset page
   useEffect(() => {
     localStorage.setItem(
       "coordinator_selected_statuses",
@@ -160,7 +154,6 @@ export default function Coordinator({
     setPage(1);
   }, [sortChain]);
 
-  // Toggle status selection on pill click
   const toggleStatus = (status) => {
     setSelectedStatuses((prev) =>
       prev.includes(status)
@@ -169,22 +162,18 @@ export default function Coordinator({
     );
   };
 
-  // Uniform 3-state cycle for every column:
-  // [None] -> [asc] -> [desc] -> [None]
   const handleSortClick = (columnKey) => {
     setSortChain((prevChain) => {
       const existingIndex = prevChain.findIndex(
         (item) => item.key === columnKey,
       );
 
-      // State 1: Column is not currently active -> Set to 'asc' as primary
       if (existingIndex === -1) {
         return [{ key: columnKey, direction: "asc" }, ...prevChain];
       }
 
       const current = prevChain[existingIndex];
 
-      // State 2: Currently 'asc' -> Move to 'desc'
       if (current.direction === "asc") {
         const withoutCurrent = prevChain.filter(
           (item) => item.key !== columnKey,
@@ -192,18 +181,15 @@ export default function Coordinator({
         return [{ key: columnKey, direction: "desc" }, ...withoutCurrent];
       }
 
-      // State 3: Currently 'desc' -> Remove completely (Unsorted / Natural)
       return prevChain.filter((item) => item.key !== columnKey);
     });
   };
 
-  // Slice past header and subheader (starts on sheet row 3)
   const rows = useMemo(() => {
     if (!sheetData || sheetData.length < 3) return [];
     return sheetData.slice(2);
   }, [sheetData]);
 
-  // KPIs scoped by selected technician
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -222,7 +208,6 @@ export default function Coordinator({
         return;
       }
 
-      // Check for unassigned: has DCR ID but no status
       if (dcrId && dcrId !== "—" && !status) {
         unassigned++;
       }
@@ -249,28 +234,24 @@ export default function Coordinator({
     };
   }, [rows, selectedTech]);
 
-  // Filter rows by multi-selected statuses AND technician, then multi-sort
   const filteredRows = useMemo(() => {
     const matches = [];
     const hasStatusFilter = selectedStatuses.length > 0;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      const dcrId = String(row[24] || "").trim(); // Col Y
-      const tech = String(row[30] || "").trim(); // Col AE
-      const status = String(row[32] || "").trim(); // Col AG
+      const dcrId = String(row[24] || "").trim();
+      const tech = String(row[30] || "").trim();
+      const status = String(row[32] || "").trim();
 
-      // Exclude rows without a valid DCR ID
       if (!dcrId || dcrId === "—") continue;
 
       const isRowUnassigned = !status;
 
       let statusMatch = false;
       if (!hasStatusFilter) {
-        // Show all: includes assigned and unassigned
         statusMatch = true;
       } else {
-        // Multi-select check
         const matchSelectedAssigned = selectedStatuses.some(
           (s) => s.toLowerCase() === status.toLowerCase(),
         );
@@ -290,7 +271,6 @@ export default function Coordinator({
       }
     }
 
-    // Only sort if there are active items in sortChain; otherwise keep natural sheet order
     if (sortChain.length > 0) {
       matches.sort((a, b) => {
         for (const sortItem of sortChain) {
@@ -324,15 +304,15 @@ export default function Coordinator({
     return matches;
   }, [rows, selectedStatuses, selectedTech, sortChain]);
 
-  // Pagination slice
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPageRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
 
+  // Update status and supply activeRegion
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
-    if (!newStatus || newStatus === "Unassigned") return; // Guard against writing "Unassigned" to sheets
+    if (!newStatus || newStatus === "Unassigned") return;
     setUpdatingRow(sheetRowNumber);
 
     try {
@@ -346,6 +326,7 @@ export default function Coordinator({
           tabName: "Cable Replacement",
           cell: `AG${sheetRowNumber}`,
           value: newStatus,
+          region: activeRegion?.id,
         }),
       });
 
@@ -366,7 +347,6 @@ export default function Coordinator({
     }
   };
 
-  // Helper to render sort arrows and priority badge in table headers
   const renderSortIndicator = (columnKey) => {
     const index = sortChain.findIndex((item) => item.key === columnKey);
     if (index === -1) {
@@ -420,20 +400,17 @@ export default function Coordinator({
           border-color: var(--btn-primary-bg);
         }
 
-
         :root .status-pill.active {
           background: #e8f0fe;
           color: #1a73e8;
           border-color: #1a73e8;
         }
 
-
         [data-theme='dark'] .status-pill.active {
           background: #1e293b;
           color: #60a5fa;
           border-color: #3b82f6;
         }
-
 
         .dcr-table-row {
           border-bottom: 1px solid var(--border-subtle);
@@ -442,7 +419,6 @@ export default function Coordinator({
         .dcr-table-row:hover {
           background-color: var(--bg-card-subtle);
         }
-
 
         .status-select-badge {
           padding: 4px 10px;
@@ -459,7 +435,6 @@ export default function Coordinator({
         [data-theme='dark'] .status-select-badge {
           border: 1px solid #3f4756;
         }
-
 
         .sortable-th {
           cursor: pointer;
@@ -701,7 +676,6 @@ export default function Coordinator({
             gap: "16px",
           }}
         >
-          {/* Status Multi-Select Toggle Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {[...statusOptions, "Unassigned"].map((status) => {
               const active = selectedStatuses.includes(status);
@@ -718,7 +692,6 @@ export default function Coordinator({
             })}
           </div>
 
-          {/* Technician Dropdown Filter */}
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
             <label
               style={{
@@ -869,7 +842,7 @@ export default function Coordinator({
                     }}
                   >
                     {loading
-                      ? "Loading records..."
+                      ? `Loading records for ${activeRegion?.name || "region"}...`
                       : `No records found matching the active status and technician filters.`}
                   </td>
                 </tr>

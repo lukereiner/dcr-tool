@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext } from "react";
+import React, { useState, useEffect, createContext, useCallback } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -39,13 +39,13 @@ const DEFAULT_DROPDOWN_OPTIONS = {
   AL: ["Yes", "No"],
 };
 
-// Login View
+// Login View with extended openid email profile scopes
 function LoginView({ onLoginSuccess, sessionExpired }) {
   const [loginError, setLoginError] = useState("");
 
   const login = useGoogleLogin({
     scope:
-      "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
+      "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
     prompt: "select_account",
     onSuccess: (tokenResponse) => {
       setLoginError("");
@@ -99,8 +99,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             lineHeight: 1.5,
           }}
         >
-          Sign in with your authorized Google account to review and manage
-          operations.
+          Sign in with your authorized Google account to review and manage operations.
         </p>
 
         {sessionExpired && !loginError && (
@@ -159,16 +158,29 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
   );
 }
 
-// Navigation Bar
-function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
+// Navigation Bar with Dynamic Header & Region Switcher
+function NavigationBar({
+  onRefresh,
+  loading,
+  onLogout,
+  theme,
+  onToggleTheme,
+  activeRegion,
+  allowedRegions,
+  onRegionChange,
+}) {
   const location = useLocation();
 
   const navItems = [
-    { label: "Dashboard", path: "/"},
+    { label: "Dashboard", path: "/" },
     { label: "Coordinator", path: "/coordinator" },
     { label: "Sheet Data", path: "/data" },
-    { label: "Pole Transfers", path: "/pole-transfers" },
+   // { label: "Pole Transfers", path: "/pole-transfers" },
   ];
+
+  const headerTitle = activeRegion
+    ? `${activeRegion.name.toUpperCase()} | F27 Tracking`
+    : "DCR TOOL | F27 Tracking";
 
   return (
     <header
@@ -189,16 +201,44 @@ function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
           height: "64px",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "32px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "28px" }}>
+          {/* Dynamic Region Brand */}
           <div
             style={{
               fontWeight: 700,
               fontSize: "18px",
               color: "var(--btn-primary-bg)",
+              whiteSpace: "nowrap",
             }}
           >
-            OHIO | F27 Tracking
+            {headerTitle}
           </div>
+
+          {/* Multi-Region Dropdown Switcher (Only if user has access to > 1 region) */}
+          {allowedRegions && allowedRegions.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <select
+                value={activeRegion?.id || ""}
+                onChange={(e) => onRegionChange(e.target.value)}
+                className="dcr-select"
+                style={{
+                  padding: "5px 10px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  borderRadius: "6px",
+                  background: "var(--bg-card-subtle)",
+                  color: "var(--text-main)",
+                  border: "1px solid var(--border-color)",
+                }}
+              >
+                {allowedRegions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <nav style={{ display: "flex", gap: "8px" }}>
             {navItems.map((item) => {
@@ -213,12 +253,8 @@ function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
                     textDecoration: "none",
                     fontSize: "14px",
                     fontWeight: active ? 600 : 500,
-                    color: active
-                      ? "var(--btn-primary-bg)"
-                      : "var(--text-muted)",
-                    background: active
-                      ? "var(--bg-card-subtle)"
-                      : "transparent",
+                    color: active ? "var(--btn-primary-bg)" : "var(--text-muted)",
+                    background: active ? "var(--bg-card-subtle)" : "transparent",
                   }}
                 >
                   {item.label}
@@ -228,9 +264,8 @@ function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
           </nav>
         </div>
 
-        {/* Top Right Action Cluster */}
+        {/* Action Cluster */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-          {/* Theme Toggle Button */}
           <button
             onClick={onToggleTheme}
             className="btn-secondary"
@@ -255,7 +290,7 @@ function NavigationBar({ onRefresh, loading, onLogout, theme, onToggleTheme }) {
   );
 }
 
-// Inner App with Global Routing
+// Inner App with Global State & Dynamic Region Management
 function AppContent() {
   const { showToast } = useToast();
   const [accessToken, setAccessToken] = useState(() => {
@@ -275,19 +310,25 @@ function AppContent() {
   const [loading, setLoading] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
 
+  // Region & Role States
+  const [allowedRegions, setAllowedRegions] = useState([]);
+  const [activeRegion, setActiveRegion] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  // dropdowns in data val (cable replacment sheet)
-  const [dropdownOptions, setDropdownOptions] = useState(
-    DEFAULT_DROPDOWN_OPTIONS,
-  );
+  const [dropdownOptions, setDropdownOptions] = useState(DEFAULT_DROPDOWN_OPTIONS);
 
   const logout = (dueToExpiry = false) => {
     sessionStorage.removeItem("dcr_access_token");
     sessionStorage.removeItem("dcr_token_expiry");
     setAccessToken(null);
+    setAllowedRegions([]);
+    setActiveRegion(null);
+    setUserProfile(null);
+    setSheetData([]);
     setSessionExpired(dueToExpiry);
   };
 
@@ -296,23 +337,64 @@ function AppContent() {
     setSessionExpired(false);
   };
 
-  const fetchSheet = async (forceRefresh = false) => {
+  // Bootstrap user permissions & allowed regions from Master Sheet
+  const fetchUserConfig = useCallback(async () => {
     if (!accessToken) return;
-    setLoading(true);
     try {
-      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}${forceRefresh ? "&refresh=true" : ""}`;
-      const res = await fetch(url, {
+      const res = await fetch("/api/auth/me", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
+
       if (res.status === 401) {
         logout(true);
         return;
       }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      setUserProfile({ email: data.email, role: data.role });
+      setAllowedRegions(data.allowedRegions || []);
+
+      // Check saved region in localStorage; fallback to the first region in the list
+      const savedRegionId = localStorage.getItem("dcr_active_region_id");
+      const matchedSaved = (data.allowedRegions || []).find((r) => r.id === savedRegionId);
+
+      const initialRegion = matchedSaved || (data.allowedRegions && data.allowedRegions[0]) || null;
+      if (initialRegion) {
+        setActiveRegion(initialRegion);
+        localStorage.setItem("dcr_active_region_id", initialRegion.id);
+      }
+    } catch (err) {
+      showToast(`User authorization error: ${err.message}`, "error");
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchUserConfig();
+    }
+  }, [accessToken, fetchUserConfig]);
+
+  // Fetch sheet data for the active region
+  const fetchSheet = async (forceRefresh = false) => {
+    if (!accessToken || !activeRegion) return;
+    setLoading(true);
+    try {
+      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}&region=${encodeURIComponent(activeRegion.id)}${forceRefresh ? "&refresh=true" : ""}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
       setSheetData(data.values || []);
-      // Overwrite with live dynamic options from Data Val (Cable Replacement)
       if (data.dropdownOptions) {
         setDropdownOptions(data.dropdownOptions);
       }
@@ -323,18 +405,26 @@ function AppContent() {
     }
   };
 
+  // Re-fetch data whenever activeRegion or tabName changes
   useEffect(() => {
-    if (accessToken && sheetData.length === 0) {
+    if (accessToken && activeRegion) {
       fetchSheet(false);
     }
-  }, [accessToken, tabName]);
+  }, [accessToken, activeRegion?.id, tabName]);
+
+  const handleRegionChange = (newRegionId) => {
+    const nextRegion = allowedRegions.find((r) => r.id === newRegionId);
+    if (nextRegion) {
+      setActiveRegion(nextRegion);
+      localStorage.setItem("dcr_active_region_id", nextRegion.id);
+      setSheetData([]); // Clear previous region's data from memory
+    }
+  };
 
   const handleGlobalRefresh = (forceRefresh = true) => {
     if (window.location.pathname.startsWith("/dcr/")) {
-      // On DCR page: only signal DCRReview to refresh (which will update the server cache)
       setRefreshSignal((prev) => prev + 1);
     } else {
-      // On Coordinator or Sheet Data: refresh the main table data
       fetchSheet(forceRefresh);
     }
   };
@@ -350,11 +440,6 @@ function AppContent() {
     });
   };
 
-  const handleRecordUpdated = (sheetRowNumber, colIndex, newValue) => {
-    handleStatusUpdated(sheetRowNumber, colIndex, newValue);
-  };
-
-  // Manage Theme State
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem("dcr_theme") || "light";
   });
@@ -369,7 +454,16 @@ function AppContent() {
   };
 
   return (
-    <AuthContext.Provider value={{ accessToken, logout, refreshSignal }}>
+    <AuthContext.Provider
+      value={{
+        accessToken,
+        logout,
+        refreshSignal,
+        activeRegion,
+        allowedRegions,
+        userProfile,
+      }}
+    >
       <BrowserRouter>
         {!accessToken ? (
           <LoginView
@@ -390,11 +484,14 @@ function AppContent() {
               onLogout={() => logout(false)}
               theme={theme}
               onToggleTheme={toggleTheme}
+              activeRegion={activeRegion}
+              allowedRegions={allowedRegions}
+              onRegionChange={handleRegionChange}
             />
 
             <main style={{ padding: "0 24px 40px 24px" }}>
               <Routes>
-                                <Route
+                <Route
                   path="/"
                   element={
                     <div
@@ -409,7 +506,7 @@ function AppContent() {
                     >
                       <h3>Dashboard</h3>
                       <p style={{ color: "#666" }}>
-                        Module coming soon. High level view of project and business logic
+                        Active Region: <strong>{activeRegion?.name || "None"}</strong>. Business logic overview coming soon.
                       </p>
                     </div>
                   }
@@ -424,6 +521,7 @@ function AppContent() {
                       accessToken={accessToken}
                       onStatusUpdated={handleStatusUpdated}
                       dropdownOptions={dropdownOptions}
+                      activeRegion={activeRegion}
                     />
                   }
                 />
@@ -450,7 +548,7 @@ function AppContent() {
                   path="/dcr/:dcrId"
                   element={
                     <DCRReview
-                      onRecordUpdated={handleRecordUpdated}
+                      onRecordUpdated={handleStatusUpdated}
                       dropdownOptions={dropdownOptions}
                     />
                   }
