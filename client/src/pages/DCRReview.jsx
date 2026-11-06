@@ -761,7 +761,7 @@ export default function DCRReview({
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
-            Submit Eval
+            Create Eval
           </a>
 
           <a
@@ -782,7 +782,7 @@ export default function DCRReview({
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
-            Submit QC
+            Create QC
           </a>
         </div>
       </div>
@@ -1044,7 +1044,7 @@ export default function DCRReview({
                   driveViewMode === "photos" ? "#ffffff" : "var(--text-muted)",
               }}
             >
-              Photos {photos.length > 0 && `(${photos.length})`}
+              Photos {/* photos.length > 0 && `(${photos.length})` */}
             </button>
             <button
               type="button"
@@ -1066,7 +1066,7 @@ export default function DCRReview({
                   driveViewMode === "files" ? "#ffffff" : "var(--text-muted)",
               }}
             >
-              Files {folderFiles.length > 0 && `(${folderFiles.length})`}
+              Files {/* folderFiles.length > 0 && `(${folderFiles.length})` */}
             </button>
           </div>
 

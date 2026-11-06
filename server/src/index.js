@@ -26,6 +26,31 @@ app.use(express.json());
 const SPREADSHEET_ID = '1EP2pkQZm2E1u_ZCqDFNCoS0xie5IfSdlJ-wpPmNCboo';
 const DATA_VAL_TAB = 'Data Val (Cable Replacement)';
 
+// Reusable exponential backoff & jitter configuration for Google APIs
+const googleRetryConfig = {
+  retry: 4, // Number of retry attempts before giving up
+  retryDelay: (err) => {
+    // Current attempt count tracked by gaxios
+    const currentAttempt = err.config?.currentRetryAttempt || 1;
+    // Exponential formula: 1000ms * 2^(attempt - 1) + jitter (0 - 500ms)
+    const baseDelay = 1000 * Math.pow(2, currentAttempt - 1);
+    const jitter = Math.floor(Math.random() * 500);
+    return baseDelay + jitter;
+  },
+  // Automatically retry 429 (Rate Limit / Quota) and 500/503 (Transient backend outages)
+  statusCodesToRetry: [
+    [429, 429],
+    [500, 503],
+  ],
+  onRetryAttempt: (err) => {
+    const status = err.response?.status || err.code;
+    const attempt = err.config?.currentRetryAttempt || 1;
+    console.warn(
+      `[GOOGLE API RETRY] HTTP ${status} encountered on ${err.config?.url}. Backing off and starting retry attempt #${attempt}...`
+    );
+  },
+};
+
 const getSheetsClient = (authHeader) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Missing or malformed Authorization header');
@@ -33,7 +58,12 @@ const getSheetsClient = (authHeader) => {
   const token = authHeader.split(' ')[1];
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: token });
-  return google.sheets({ version: 'v4', auth: oauth2Client });
+
+  return google.sheets({
+    version: 'v4',
+    auth: oauth2Client,
+    retryConfig: googleRetryConfig,
+  });
 };
 
 const getDriveClient = (authHeader) => {
@@ -43,7 +73,12 @@ const getDriveClient = (authHeader) => {
   const token = authHeader.split(' ')[1];
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: token });
-  return google.drive({ version: 'v3', auth: oauth2Client });
+
+  return google.drive({
+    version: 'v3',
+    auth: oauth2Client,
+    retryConfig: googleRetryConfig,
+  });
 };
 
 function getColLetter(index) {
@@ -388,16 +423,8 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
   try {
     const { folderId } = req.params;
     const authHeader = req.headers.authorization;
-    const accessToken = authHeader && authHeader.split(" ")[1];
 
-    if (!accessToken) {
-      return res.status(401).json({ error: "Missing access token" });
-    }
-
-    const drive = google.drive({
-      version: "v3",
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const drive = getDriveClient(authHeader);
 
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
@@ -419,15 +446,13 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
 app.get('/api/drive/file/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
-    const token = req.query.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
+    const authHeader = req.headers.authorization || (req.query.token ? `Bearer ${req.query.token}` : null);
 
-    if (!token) {
+    if (!authHeader) {
       return res.status(401).send('Missing authorization token');
     }
 
-    const oauth2Client = new google.auth.OAuth2();
-    oauth2Client.setCredentials({ access_token: token });
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
+    const drive = getDriveClient(authHeader);
 
     const response = await drive.files.get(
       { fileId, alt: 'media' },
