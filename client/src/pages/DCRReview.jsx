@@ -378,7 +378,7 @@ export default function DCRReview({
         </button>
       </div>
 
-      {/* Header Banner */}
+{/* Header Banner */}
       <div
         style={{
           background: "var(--btn-primary-bg)",
@@ -386,12 +386,65 @@ export default function DCRReview({
           padding: "16px 20px",
           borderRadius: "8px",
           marginBottom: "24px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "16px",
+          flexWrap: "wrap",
         }}
       >
-        <h1 style={{ margin: 0, fontSize: "24px" }}>{dcrId}</h1>
-        <p style={{ margin: "4px 0 0 0", opacity: 0.9, fontSize: "14px" }}>
-          Sheet Row #{dcrData.sheetRowNumber}
-        </p>
+        <div>
+          <h1 style={{ margin: 0, fontSize: "24px" }}>{dcrId}</h1>
+          <p style={{ margin: "4px 0 0 0", opacity: 0.9, fontSize: "14px" }}>
+            Sheet Row #{dcrData.sheetRowNumber}
+          </p>
+        </div>
+
+
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <a
+            href="https://forms.gle/Vq7dhmYNdWbYwbb46"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: "8px 16px",
+              background: "#ffffff",
+              color: "var(--btn-primary-bg)",
+              fontWeight: 600,
+              fontSize: "14px",
+              borderRadius: "6px",
+              textDecoration: "none",
+              display: "inline-block",
+              transition: "opacity 0.15s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            Submit Eval
+          </a>
+
+
+          <a
+            href="https://forms.gle/8BmH22qpjA9wvMY66"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              padding: "8px 16px",
+              background: "#ffffff",
+              color: "var(--btn-primary-bg)",
+              fontWeight: 600,
+              fontSize: "14px",
+              borderRadius: "6px",
+              textDecoration: "none",
+              display: "inline-block",
+              transition: "opacity 0.15s ease",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+          >
+            Submit QC
+          </a>
+        </div>
       </div>
 
       {/* Section 1: Manager Sign-offs (Columns A & B) */}

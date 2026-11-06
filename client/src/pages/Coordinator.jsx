@@ -842,7 +842,7 @@ export default function Coordinator({
                     color: "var(--text-main)",
                   }}
                 >
-                  Status (Col AG)
+                  Status
                 </th>
                 <th
                   style={{
