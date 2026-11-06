@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AuthContext } from "../App";
 import { useToast } from "../context/ToastContext";
@@ -7,22 +7,6 @@ function extractDriveFolderId(text) {
   if (!text || typeof text !== "string") return null;
   const match = text.match(/folders\/([a-zA-Z0-9_-]{25,})/);
   return match ? match[1] : null;
-}
-
-function ButtonSpinner() {
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        width: "14px",
-        height: "14px",
-        border: "2px solid rgba(255, 255, 255, 0.4)",
-        borderTop: "2px solid #ffffff",
-        borderRadius: "50%",
-        animation: "btnSpin 0.7s linear infinite",
-      }}
-    />
-  );
 }
 
 const DROPDOWN_FIELD_OPTIONS = {
@@ -49,7 +33,6 @@ const DROPDOWN_FIELD_OPTIONS = {
   AL: ["Yes", "No"],
 };
 
-// --- Helper: Format file type badge & icon ---
 function getFileBadge(mimeType, name) {
   if (mimeType?.startsWith("image/")) {
     return {
@@ -101,6 +84,185 @@ function getFileBadge(mimeType, name) {
   };
 }
 
+// Inline Sub-component: Field Status Indicator
+function FieldIndicator({ status }) {
+  if (!status || status === "idle" || status === "dirty") {
+    return null;
+  }
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "16px",
+        height: "16px",
+        marginLeft: "6px",
+        verticalAlign: "middle",
+      }}
+    >
+      {status === "saving" && (
+        <span
+          style={{
+            display: "inline-block",
+            width: "12px",
+            height: "12px",
+            border: "2px solid rgba(59, 130, 246, 0.25)",
+            borderTop: "2px solid #3b82f6",
+            borderRadius: "50%",
+            animation: "btnSpin 0.7s linear infinite",
+          }}
+        />
+      )}
+
+      {status === "saved" && (
+        <svg
+          style={{
+            width: "14px",
+            height: "14px",
+            color: "#16a34a",
+            animation: "fieldFadeIn 0.2s ease-out",
+          }}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+            clipRule="evenodd"
+          />
+        </svg>
+      )}
+
+      {status === "error" && (
+        <svg
+          style={{
+            width: "14px",
+            height: "14px",
+            color: "#dc2626",
+            animation: "fieldFadeIn 0.2s ease-out",
+          }}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+            clipRule="evenodd"
+          />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+// Inline Sub-component: Header Auto-Save Pill
+function AutoSaveHeaderStatus({ status, onRetry }) {
+  const baseStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
+    fontWeight: 500,
+    padding: "6px 14px",
+    borderRadius: "20px",
+    background: "var(--bg-card)",
+    color: "var(--text-main)",
+    border: "1px solid var(--border-color)",
+    boxShadow: "var(--shadow-card, 0 1px 3px rgba(0, 0, 0, 0.05))",
+    transition: "all 0.2s ease",
+  };
+
+
+  if (status === "saving") {
+    return (
+      <div style={baseStyle}>
+        <span
+          style={{
+            display: "inline-block",
+            width: "12px",
+            height: "12px",
+            border: "2px solid rgba(59, 130, 246, 0.25)",
+            borderTop: "2px solid var(--btn-primary-bg, #2563eb)",
+            borderRadius: "50%",
+            animation: "btnSpin 0.7s linear infinite",
+          }}
+        />
+        <span style={{ color: "var(--text-muted)" }}>Saving changes...</span>
+      </div>
+    );
+  }
+
+
+  if (status === "dirty") {
+    return (
+      <div style={baseStyle}>
+        <span
+          style={{
+            width: "8px",
+            height: "8px",
+            borderRadius: "50%",
+            background: "#eab308",
+            display: "inline-block",
+            boxShadow: "0 0 0 2px rgba(234, 179, 8, 0.2)",
+          }}
+        />
+        <span style={{ color: "var(--text-muted)" }}>Unsaved changes</span>
+      </div>
+    );
+  }
+
+
+  if (status === "error") {
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          background: "rgba(239, 68, 68, 0.1)",
+          borderColor: "rgba(239, 68, 68, 0.35)",
+        }}
+      >
+        <span style={{ color: "#ef4444", fontWeight: 600 }}>⚠️ Auto-save failed</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          style={{
+            background: "#ef4444",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "4px",
+            padding: "2px 8px",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+            marginLeft: "2px",
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+
+  return (
+    <div style={baseStyle}>
+      <span
+        style={{
+          color: "#16a34a",
+          fontSize: "14px",
+          fontWeight: 700,
+          lineHeight: 1,
+        }}
+      >
+        ✓
+      </span>
+      <span style={{ color: "var(--text-muted)" }}>All changes saved</span>
+    </div>
+  );
+}
+
 export default function DCRReview({
   onRecordUpdated,
   dropdownOptions: propDropdownOptions,
@@ -113,14 +275,29 @@ export default function DCRReview({
   const [dcrData, setDcrData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formValues, setFormValues] = useState({});
-  const [savingField, setSavingField] = useState(null);
   const [dynamicDropdowns, setDynamicDropdowns] = useState(
     propDropdownOptions || {},
   );
 
-  // Track expanded state for Section 2 spec cards
+  // Auto-Save States & Tracking
+  const [dirtyFields, setDirtyFields] = useState(new Set());
+  const [fieldStatuses, setFieldStatuses] = useState({});
+  const [globalStatus, setGlobalStatus] = useState("idle"); // 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+
+  const formValuesRef = useRef(formValues);
+  formValuesRef.current = formValues;
+
+  const dirtyFieldsRef = useRef(dirtyFields);
+  dirtyFieldsRef.current = dirtyFields;
+
+  const debounceTimerRef = useRef(null);
+  const fadeTimersRef = useRef({});
+  const inFlightSnapshotRef = useRef(null);
+
+  // Section 2 card expansions
   const [expandedFields, setExpandedFields] = useState({});
 
+  // Media view states
   const [photos, setPhotos] = useState([]);
   const [folderFiles, setFolderFiles] = useState([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -141,6 +318,194 @@ export default function DCRReview({
       ...prev,
       [colLetter]: !prev[colLetter],
     }));
+  };
+
+  // Edge Case: Alert user if they close tab while changes are pending
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (dirtyFieldsRef.current.size > 0 || inFlightSnapshotRef.current !== null) {
+        e.preventDefault();
+        e.returnValue = "";
+        return "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Core Auto-Save Dispatcher
+  const executeBatchSave = useCallback(async () => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+
+    const currentDirty = dirtyFieldsRef.current;
+    if (currentDirty.size === 0 || !dcrData) return;
+
+    // Snapshot unpersisted dirty fields
+    const snapshot = {};
+    currentDirty.forEach((colLetter) => {
+      snapshot[colLetter] = formValuesRef.current[colLetter] ?? "";
+    });
+
+    inFlightSnapshotRef.current = snapshot;
+    setGlobalStatus("saving");
+
+    // Set field indicators to saving
+    setFieldStatuses((prev) => {
+      const next = { ...prev };
+      currentDirty.forEach((colLetter) => {
+        next[colLetter] = "saving";
+      });
+      return next;
+    });
+
+    try {
+      const res = await fetch(`/api/dcr/${encodeURIComponent(dcrId)}/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ updates: snapshot }),
+      });
+
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Batch update failed");
+
+      setGlobalStatus("saved");
+
+      // Sync updated values to parent App state
+      if (onRecordUpdated && dcrData.fields) {
+        Object.entries(snapshot).forEach(([colLetter, val]) => {
+          const fieldDef = dcrData.fields.find((f) => f.colLetter === colLetter);
+          if (fieldDef) {
+            onRecordUpdated(dcrData.sheetRowNumber, fieldDef.colIndex, val);
+          }
+        });
+      }
+
+      // Race Condition Defense: compare snapshot with active local state
+      setDirtyFields((prevDirty) => {
+        const nextDirty = new Set(prevDirty);
+        const resolvedCols = [];
+
+        Object.keys(snapshot).forEach((colLetter) => {
+          if (formValuesRef.current[colLetter] === snapshot[colLetter]) {
+            nextDirty.delete(colLetter);
+            resolvedCols.push(colLetter);
+          }
+        });
+
+        // Trigger green checkmark with 2.5s auto-fade
+        setFieldStatuses((prevStatuses) => {
+          const nextStatuses = { ...prevStatuses };
+
+          resolvedCols.forEach((colLetter) => {
+            nextStatuses[colLetter] = "saved";
+
+            if (fadeTimersRef.current[colLetter]) {
+              clearTimeout(fadeTimersRef.current[colLetter]);
+            }
+
+            fadeTimersRef.current[colLetter] = setTimeout(() => {
+              setFieldStatuses((curr) => {
+                if (curr[colLetter] === "saved") {
+                  return { ...curr, [colLetter]: "idle" };
+                }
+                return curr;
+              });
+            }, 2500);
+          });
+
+          return nextStatuses;
+        });
+
+        // If user typed in another field during network transit, re-queue debounce
+        if (nextDirty.size > 0) {
+          setGlobalStatus("dirty");
+          debounceTimerRef.current = setTimeout(executeBatchSave, 3000);
+        }
+
+        return nextDirty;
+      });
+    } catch (err) {
+      console.error("Auto-save error:", err);
+      setGlobalStatus("error");
+      showToast(`Auto-save error: ${err.message}`, "error");
+
+      setFieldStatuses((prev) => {
+        const next = { ...prev };
+        Object.keys(snapshot).forEach((colLetter) => {
+          next[colLetter] = "error";
+        });
+        return next;
+      });
+    } finally {
+      inFlightSnapshotRef.current = null;
+    }
+  }, [dcrData, dcrId, accessToken, logout, onRecordUpdated, showToast]);
+
+  // Edge Case: Auto-retry pending saves once network returns
+  useEffect(() => {
+    const handleOnline = () => {
+      if (dirtyFieldsRef.current.size > 0) {
+        executeBatchSave();
+      }
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [executeBatchSave]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      Object.values(fadeTimersRef.current).forEach((t) => clearTimeout(t));
+    };
+  }, []);
+
+  // Input change handler: clears indicator immediately and restarts 3s debounce
+  const handleFieldChange = (colLetter, value) => {
+    // 1. Update local state
+    setFormValues((prev) => ({
+      ...prev,
+      [colLetter]: value,
+    }));
+
+    // 2. Mark dirty
+    setDirtyFields((prev) => {
+      const next = new Set(prev);
+      next.add(colLetter);
+      return next;
+    });
+
+    // 3. Reset existing fade timers & clear visual status immediately
+    if (fadeTimersRef.current[colLetter]) {
+      clearTimeout(fadeTimersRef.current[colLetter]);
+      delete fadeTimersRef.current[colLetter];
+    }
+
+    setFieldStatuses((prev) => ({
+      ...prev,
+      [colLetter]: "dirty",
+    }));
+
+    setGlobalStatus("dirty");
+
+    // 4. Reset debounce timer (3 seconds)
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      executeBatchSave();
+    }, 3000);
   };
 
   const loadDcr = async (force = false) => {
@@ -169,6 +534,9 @@ export default function DCRReview({
         initialInputs[f.colLetter] = f.value;
       });
       setFormValues(initialInputs);
+      setDirtyFields(new Set());
+      setFieldStatuses({});
+      setGlobalStatus("idle");
 
       if (force) {
         showToast(
@@ -237,46 +605,11 @@ export default function DCRReview({
     }
   }, [refreshSignal]);
 
-  // Update dynamic dropdowns if props change
   useEffect(() => {
     if (propDropdownOptions) {
       setDynamicDropdowns((prev) => ({ ...prev, ...propDropdownOptions }));
     }
   }, [propDropdownOptions]);
-
-  const handleSaveField = async (colLetter, colHeader, colIndex) => {
-    if (!dcrData) return;
-    const value = formValues[colLetter] ?? "";
-    setSavingField(colLetter);
-
-    try {
-      const res = await fetch(`/api/dcr/${encodeURIComponent(dcrId)}/cell`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ colLetter, value }),
-      });
-
-      if (res.status === 401) {
-        logout(true);
-        return;
-      }
-
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error);
-
-      showToast(`Saved ${colHeader} (${result.cell}) successfully!`, "success");
-      if (onRecordUpdated) {
-        onRecordUpdated(dcrData.sheetRowNumber, colIndex, value);
-      }
-    } catch (err) {
-      showToast(`Failed to save ${colHeader}: ${err.message}`, "error");
-    } finally {
-      setSavingField(null);
-    }
-  };
 
   if (loading) {
     return (
@@ -321,8 +654,11 @@ export default function DCRReview({
           100% { transform: rotate(360deg); }
         }
 
+        @keyframes fieldFadeIn {
+          from { opacity: 0; transform: scale(0.8); }
+          to { opacity: 1; transform: scale(1); }
+        }
 
-        /* Header clamped to exactly 2 lines max with ellipsis */
         .spec-header-clamped {
           display: -webkit-box;
           -webkit-line-clamp: 2;
@@ -333,8 +669,6 @@ export default function DCRReview({
           height: 2.7em;
         }
 
-
-        /* Value clamped to 2 lines max when collapsed */
         .spec-value-clamped {
           display: -webkit-box;
           -webkit-line-clamp: 2;
@@ -342,7 +676,6 @@ export default function DCRReview({
           overflow: hidden;
           text-overflow: ellipsis;
         }
-
 
         .spec-expand-btn {
           background: none;
@@ -376,9 +709,15 @@ export default function DCRReview({
         >
           ← Back to All Records
         </button>
+
+                  {/* Global Auto-Save Status */}
+          <AutoSaveHeaderStatus
+            status={globalStatus}
+            onRetry={executeBatchSave}
+          />
       </div>
 
-{/* Header Banner */}
+      {/* Header Banner */}
       <div
         style={{
           background: "var(--btn-primary-bg)",
@@ -400,8 +739,10 @@ export default function DCRReview({
           </p>
         </div>
 
+        <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+
+          {/* External Google Forms Links */}
           <a
             href="https://forms.gle/Vq7dhmYNdWbYwbb46"
             target="_blank"
@@ -422,7 +763,6 @@ export default function DCRReview({
           >
             Submit Eval
           </a>
-
 
           <a
             href="https://forms.gle/8BmH22qpjA9wvMY66"
@@ -474,56 +814,41 @@ export default function DCRReview({
             gap: "16px",
           }}
         >
-          {managerSignOffs.map((f) => {
-            const isSaving = savingField === f.colLetter;
-            return (
-              <div
-                key={f.colLetter}
+          {managerSignOffs.map((f) => (
+            <div
+              key={f.colLetter}
+              style={{
+                background: "var(--bg-card-subtle)",
+                padding: "12px",
+                borderRadius: "6px",
+                border: "1px solid var(--border-subtle)",
+              }}
+            >
+              <label
                 style={{
-                  background: "var(--bg-card-subtle)",
-                  padding: "12px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border-subtle)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                  marginBottom: "6px",
+                  color: "var(--text-main)",
                 }}
               >
-                <label
-                  style={{
-                    display: "block",
-                    fontWeight: 600,
-                    fontSize: "13px",
-                    marginBottom: "6px",
-                    color: "var(--text-main)",
-                  }}
-                >
+                <span>
                   {f.header} ({f.colLetter})
-                </label>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <input
-                    type="text"
-                    className="dcr-input"
-                    value={formValues[f.colLetter] ?? ""}
-                    onChange={(e) =>
-                      setFormValues({
-                        ...formValues,
-                        [f.colLetter]: e.target.value,
-                      })
-                    }
-                    style={{ flex: 1 }}
-                  />
-                  <button
-                    onClick={() =>
-                      handleSaveField(f.colLetter, f.header, f.colIndex)
-                    }
-                    disabled={isSaving}
-                    className="btn-primary"
-                    style={{ minWidth: "72px" }}
-                  >
-                    {isSaving ? <ButtonSpinner /> : "Save"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                </span>
+                <FieldIndicator status={fieldStatuses[f.colLetter]} />
+              </label>
+              <input
+                type="text"
+                className="dcr-input"
+                value={formValues[f.colLetter] ?? ""}
+                onChange={(e) => handleFieldChange(f.colLetter, e.target.value)}
+                style={{ width: "100%" }}
+              />
+            </div>
+          ))}
         </div>
       </div>
 
@@ -581,7 +906,6 @@ export default function DCRReview({
                   boxSizing: "border-box",
                 }}
               >
-                {/* Top-pinned Column Label (Max 2 lines with ellipsis) */}
                 <div
                   className="spec-header-clamped"
                   style={{
@@ -595,10 +919,8 @@ export default function DCRReview({
                   {f.header} ({f.colLetter})
                 </div>
 
-                {/* Bottom-pinned Value Block */}
                 <div style={{ marginTop: "auto" }}>
                   {isLong && !isExpanded ? (
-                    /* Collapsed: 2-line max with 'More ▼' anchored on line 2 */
                     <div
                       style={{
                         position: "relative",
@@ -639,7 +961,6 @@ export default function DCRReview({
                       </button>
                     </div>
                   ) : (
-                    /* Normal or Expanded State */
                     <div>
                       <div
                         style={{
@@ -684,7 +1005,6 @@ export default function DCRReview({
           boxShadow: "var(--shadow-card)",
         }}
       >
-        {/* Header with Sliding Toggle */}
         <div
           style={{
             display: "flex",
@@ -695,7 +1015,6 @@ export default function DCRReview({
             gap: "10px",
           }}
         >
-          {/* Sliding Toggle: Photos vs Files */}
           <div
             style={{
               display: "inline-flex",
@@ -782,7 +1101,6 @@ export default function DCRReview({
             Loading folder contents from Google Drive...
           </div>
         ) : driveViewMode === "photos" ? (
-          /* ================= PHOTOS VIEW ================= */
           photos.length === 0 ? (
             <div
               style={{
@@ -929,8 +1247,7 @@ export default function DCRReview({
               </div>
             </div>
           )
-        ) : /* ================= FILES VIEW ================= */
-        folderFiles.length === 0 ? (
+        ) : folderFiles.length === 0 ? (
           <div
             style={{
               padding: "30px",
@@ -1086,6 +1403,7 @@ export default function DCRReview({
           </div>
         )}
       </div>
+
       {/* Section 4: Post-Spec Processing Fields */}
       {postSpecsFields.length > 0 && (
         <div
@@ -1115,9 +1433,6 @@ export default function DCRReview({
             }}
           >
             {postSpecsFields.map((f) => {
-              const isSaving = savingField === f.colLetter;
-
-              // Resolve options: dynamic response -> app prop -> default fallback
               const rawOptions =
                 dynamicDropdowns[f.colLetter] &&
                 dynamicDropdowns[f.colLetter].length > 0
@@ -1130,7 +1445,6 @@ export default function DCRReview({
 
               const currentValue = formValues[f.colLetter] ?? "";
 
-              // If options exist, guarantee any historical saved value is preserved as an option
               let dropdownOptions = null;
               if (rawOptions && rawOptions.length > 0) {
                 dropdownOptions = [...rawOptions];
@@ -1151,61 +1465,48 @@ export default function DCRReview({
                 >
                   <label
                     style={{
-                      display: "block",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
                       fontWeight: 600,
                       fontSize: "13px",
                       marginBottom: "6px",
                       color: "var(--text-main)",
                     }}
                   >
-                    {f.header} ({f.colLetter})
+                    <span>
+                      {f.header} ({f.colLetter})
+                    </span>
+                    <FieldIndicator status={fieldStatuses[f.colLetter]} />
                   </label>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    {dropdownOptions ? (
-                      <select
-                        className="dcr-select"
-                        value={currentValue}
-                        onChange={(e) =>
-                          setFormValues({
-                            ...formValues,
-                            [f.colLetter]: e.target.value,
-                          })
-                        }
-                        style={{ flex: 1 }}
-                      >
-                        <option value="">- Select -</option>
-                        {dropdownOptions.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        className="dcr-input"
-                        value={currentValue}
-                        onChange={(e) =>
-                          setFormValues({
-                            ...formValues,
-                            [f.colLetter]: e.target.value,
-                          })
-                        }
-                        style={{ flex: 1 }}
-                      />
-                    )}
 
-                    <button
-                      onClick={() =>
-                        handleSaveField(f.colLetter, f.header, f.colIndex)
+                  {dropdownOptions ? (
+                    <select
+                      className="dcr-select"
+                      value={currentValue}
+                      onChange={(e) =>
+                        handleFieldChange(f.colLetter, e.target.value)
                       }
-                      disabled={isSaving}
-                      className="btn-primary"
-                      style={{ minWidth: "72px" }}
+                      style={{ width: "100%" }}
                     >
-                      {isSaving ? <ButtonSpinner /> : "Save"}
-                    </button>
-                  </div>
+                      <option value="">- Select -</option>
+                      {dropdownOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      className="dcr-input"
+                      value={currentValue}
+                      onChange={(e) =>
+                        handleFieldChange(f.colLetter, e.target.value)
+                      }
+                      style={{ width: "100%" }}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -1234,9 +1535,16 @@ export default function DCRReview({
             }}
           >
             <h3
-              style={{ margin: 0, fontSize: "16px", color: "var(--text-main)" }}
+              style={{
+                margin: 0,
+                fontSize: "16px",
+                color: "var(--text-main)",
+                display: "flex",
+                alignItems: "center",
+              }}
             >
               {commentsField.header || "Comments"} ({commentsField.colLetter})
+              <FieldIndicator status={fieldStatuses[commentsField.colLetter]} />
             </h3>
           </div>
 
@@ -1245,39 +1553,11 @@ export default function DCRReview({
             className="dcr-textarea"
             value={formValues[commentsField.colLetter] ?? ""}
             onChange={(e) =>
-              setFormValues({
-                ...formValues,
-                [commentsField.colLetter]: e.target.value,
-              })
+              handleFieldChange(commentsField.colLetter, e.target.value)
             }
             placeholder="Enter review remarks, coordinator notes, or reason for status update..."
-            style={{ width: "100%", marginBottom: "12px", resize: "vertical" }}
+            style={{ width: "100%", resize: "vertical" }}
           />
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              onClick={() =>
-                handleSaveField(
-                  commentsField.colLetter,
-                  commentsField.header,
-                  commentsField.colIndex,
-                )
-              }
-              disabled={savingField === commentsField.colLetter}
-              className="btn-primary"
-              style={{
-                minWidth: "120px",
-                padding: "8px 20px",
-                fontWeight: 600,
-              }}
-            >
-              {savingField === commentsField.colLetter ? (
-                <ButtonSpinner />
-              ) : (
-                "Save Comments"
-              )}
-            </button>
-          </div>
         </div>
       )}
 

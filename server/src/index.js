@@ -6,33 +6,25 @@ import NodeCache from 'node-cache';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-
 dotenv.config();
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-
 const app = express();
 const PORT = process.env.PORT || 5000;
-
 
 // 5-minute TTL
 const cache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
-
 // Prevent duplicate in-flight API requests (cache stampede protection)
 const pendingRequests = new Map();
-
 
 app.use(cors());
 app.use(express.json());
 
-
 const SPREADSHEET_ID = '1EP2pkQZm2E1u_ZCqDFNCoS0xie5IfSdlJ-wpPmNCboo';
 const DATA_VAL_TAB = 'Data Val (Cable Replacement)';
-
 
 const getSheetsClient = (authHeader) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -44,7 +36,6 @@ const getSheetsClient = (authHeader) => {
   return google.sheets({ version: 'v4', auth: oauth2Client });
 };
 
-
 const getDriveClient = (authHeader) => {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Missing or malformed Authorization header');
@@ -54,7 +45,6 @@ const getDriveClient = (authHeader) => {
   oauth2Client.setCredentials({ access_token: token });
   return google.drive({ version: 'v3', auth: oauth2Client });
 };
-
 
 function getColLetter(index) {
   let letter = '';
@@ -66,8 +56,6 @@ function getColLetter(index) {
   return letter;
 }
 
-
-// Helper to convert validation sheet rows into key-value options dictionary
 // Helper to convert validation sheet rows into key-value options dictionary
 function parseValidationRows(valRows) {
   const optionsMap = {
@@ -77,16 +65,12 @@ function parseValidationRows(valRows) {
     AL: [],
   };
 
-
   if (!valRows || valRows.length < 2) return optionsMap;
-
 
   const headers = valRows[0] || [];
   const colLetterMapping = {};
 
-
   headers.forEach((header, colIdx) => {
-    // Match all parentheses groups and pick the LAST one to avoid "(s)" in "Technician(s) (AE)"
     const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
     if (matches.length > 0) {
       const colLetter = matches[matches.length - 1][1].toUpperCase();
@@ -96,7 +80,6 @@ function parseValidationRows(valRows) {
       }
     }
   });
-
 
   for (let r = 1; r < valRows.length; r++) {
     const row = valRows[r];
@@ -108,52 +91,42 @@ function parseValidationRows(valRows) {
     });
   }
 
-
   return optionsMap;
 }
-
 
 // Centralized fetch helper with single-call batchGet for data + validation options
 async function getOrFetchSheetWithValidation(sheets, tabName, forceRefresh = false) {
   const cacheKey = `sheet_bundle_${tabName}`;
-
 
   if (forceRefresh) {
     cache.del(cacheKey);
     console.log(`[FORCE REFRESH] Invalidation requested for ${tabName}`);
   }
 
-
   if (cache.has(cacheKey)) {
     console.log(`[CACHE HIT] Serving ${tabName} from NodeCache`);
     return cache.get(cacheKey);
   }
-
 
   if (pendingRequests.has(cacheKey)) {
     console.log(`[IN-FLIGHT REUSE] Waiting on pending fetch for ${tabName}`);
     return pendingRequests.get(cacheKey);
   }
 
-
   console.log(`[CACHE MISS] Batch-fetching fresh ${tabName} & ${DATA_VAL_TAB}...`);
   const fetchPromise = (async () => {
     try {
-      // Single API call retrieving both the target tab and the validation tab together
       const response = await sheets.spreadsheets.values.batchGet({
         spreadsheetId: SPREADSHEET_ID,
         ranges: [`'${tabName}'!A1:ZZ`, `'${DATA_VAL_TAB}'!A1:Z`],
       });
 
-
       const valueRanges = response.data.valueRanges || [];
       const values = valueRanges[0]?.values || [];
       const valRows = valueRanges[1]?.values || [];
 
-
       const dropdownOptions = parseValidationRows(valRows);
       const bundle = { values, dropdownOptions };
-
 
       cache.set(cacheKey, bundle);
       return bundle;
@@ -162,23 +135,19 @@ async function getOrFetchSheetWithValidation(sheets, tabName, forceRefresh = fal
     }
   })();
 
-
   pendingRequests.set(cacheKey, fetchPromise);
   return fetchPromise;
 }
 
-
 // ---------------------------------------------------------------------------
 // Sheet Endpoints
 // ---------------------------------------------------------------------------
-
 
 app.get('/api/sheet', async (req, res) => {
   try {
     const tabName = req.query.tab || 'Cable Replacement';
     const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
-
 
     const { values, dropdownOptions } = await getOrFetchSheetWithValidation(sheets, tabName, forceRefresh);
     res.json({ values, dropdownOptions });
@@ -191,17 +160,14 @@ app.get('/api/sheet', async (req, res) => {
   }
 });
 
-
 app.post('/api/sheet/cell', async (req, res) => {
   try {
     const sheets = getSheetsClient(req.headers.authorization);
     const { tabName = 'Cable Replacement', cell, value } = req.body;
 
-
     if (!cell) {
       return res.status(400).json({ error: 'Missing cell coordinate (e.g. B2)' });
     }
-
 
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
@@ -210,10 +176,8 @@ app.post('/api/sheet/cell', async (req, res) => {
       requestBody: { values: [[value]] },
     });
 
-
     cache.del(`sheet_bundle_${tabName}`);
     console.log(`[CACHE INVALIDATED] Cleared cache for ${tabName} due to update at ${cell}`);
-
 
     res.json({ success: true, updatedRange: response.data.updatedRange });
   } catch (error) {
@@ -225,11 +189,9 @@ app.post('/api/sheet/cell', async (req, res) => {
   }
 });
 
-
 // ---------------------------------------------------------------------------
 // Dedicated DCR Endpoints
 // ---------------------------------------------------------------------------
-
 
 app.get('/api/dcr/:dcrId', async (req, res) => {
   try {
@@ -237,18 +199,14 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
 
-
     const { values: rows, dropdownOptions } = await getOrFetchSheetWithValidation(sheets, 'Cable Replacement', forceRefresh);
-
 
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Cable Replacement sheet is empty' });
     }
 
-
     const headers = rows[0];
     const DCR_COL_INDEX = 24; // Col Y
-
 
     let foundIndex = -1;
     for (let i = 1; i < rows.length; i++) {
@@ -259,15 +217,12 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
       }
     }
 
-
     if (foundIndex === -1) {
       return res.status(404).json({ error: `DCR ID "${dcrId}" not found in Column Y` });
     }
 
-
     const targetRow = rows[foundIndex];
     const sheetRowNumber = foundIndex + 1;
-
 
     const fields = headers.map((header, idx) => ({
       colIndex: idx,
@@ -276,7 +231,6 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
       value: targetRow[idx] || '',
       isReadOnly: idx >= 2 && idx <= 24,
     }));
-
 
     res.json({
       dcrId,
@@ -293,21 +247,18 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
   }
 });
 
-
+// Single-cell update fallback endpoint
 app.post('/api/dcr/:dcrId/cell', async (req, res) => {
   try {
     const { dcrId } = req.params;
     const { colLetter, value } = req.body;
 
-
     if (!colLetter) {
       return res.status(400).json({ error: 'Missing colLetter parameter (e.g. "A", "B", "Z")' });
     }
 
-
     const cleanCol = colLetter.trim().toUpperCase();
     const colIndex = cleanCol.charCodeAt(0) - 65;
-
 
     if (cleanCol.length === 1 && colIndex >= 2 && colIndex <= 24) {
       return res.status(403).json({
@@ -315,11 +266,9 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
       });
     }
 
-
     const sheets = getSheetsClient(req.headers.authorization);
     const { values: rows } = await getOrFetchSheetWithValidation(sheets, 'Cable Replacement', false);
     const DCR_COL_INDEX = 24;
-
 
     let foundIndex = -1;
     for (let i = 1; i < rows.length; i++) {
@@ -330,15 +279,12 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
       }
     }
 
-
     if (foundIndex === -1) {
       return res.status(404).json({ error: `DCR ID "${dcrId}" not found in Column Y` });
     }
 
-
     const sheetRowNumber = foundIndex + 1;
     const targetCell = `${cleanCol}${sheetRowNumber}`;
-
 
     const updateResponse = await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
@@ -347,10 +293,8 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
       requestBody: { values: [[value]] },
     });
 
-
     cache.del('sheet_bundle_Cable Replacement');
     console.log(`[CACHE INVALIDATED] Cleared Cable Replacement cache after updating ${targetCell} for DCR ${dcrId}`);
-
 
     res.json({
       success: true,
@@ -366,11 +310,79 @@ app.post('/api/dcr/:dcrId/cell', async (req, res) => {
   }
 });
 
+// Batch update endpoint for debounced auto-save (Consumes 1 Google Sheets API write request)
+app.post('/api/dcr/:dcrId/batch', async (req, res) => {
+  try {
+    const { dcrId } = req.params;
+    const { updates } = req.body; // Map: { "A": "Approved", "AR": "Notes..." }
+
+    if (!updates || typeof updates !== 'object' || Object.keys(updates).length === 0) {
+      return res.json({ success: true, message: 'No updates to persist' });
+    }
+
+    // Verify none of the modified columns fall within protected range C through Y
+    for (const colLetter of Object.keys(updates)) {
+      const cleanCol = colLetter.trim().toUpperCase();
+      const colIndex = cleanCol.charCodeAt(0) - 65;
+      if (cleanCol.length === 1 && colIndex >= 2 && colIndex <= 24) {
+        return res.status(403).json({
+          error: `Column ${cleanCol} is protected form data and cannot be edited.`,
+        });
+      }
+    }
+
+    const sheets = getSheetsClient(req.headers.authorization);
+    const { values: rows } = await getOrFetchSheetWithValidation(sheets, 'Cable Replacement', false);
+    const DCR_COL_INDEX = 24;
+
+    let foundIndex = -1;
+    for (let i = 1; i < rows.length; i++) {
+      const cellVal = String(rows[i][DCR_COL_INDEX] || '').trim();
+      if (cellVal.toLowerCase() === String(dcrId).trim().toLowerCase()) {
+        foundIndex = i;
+        break;
+      }
+    }
+
+    if (foundIndex === -1) {
+      return res.status(404).json({ error: `DCR ID "${dcrId}" not found in Column Y` });
+    }
+
+    const sheetRowNumber = foundIndex + 1;
+
+    const data = Object.entries(updates).map(([colLetter, value]) => ({
+      range: `'Cable Replacement'!${colLetter.trim().toUpperCase()}${sheetRowNumber}`,
+      values: [[value ?? '']],
+    }));
+
+    const response = await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        valueInputOption: 'USER_ENTERED',
+        data,
+      },
+    });
+
+    cache.del('sheet_bundle_Cable Replacement');
+    console.log(`[CACHE INVALIDATED] Cleared Cable Replacement cache after batch update for DCR ${dcrId}`);
+
+    res.json({
+      success: true,
+      totalUpdatedCells: response.data.totalUpdatedCells,
+      updatedRow: sheetRowNumber,
+    });
+  } catch (error) {
+    console.error('Error batch updating DCR:', error?.response?.data || error.message);
+    const status = error?.response?.status || 500;
+    res.status(status).json({
+      error: error?.response?.data?.error?.message || error.message,
+    });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Drive Photo Endpoints
 // ---------------------------------------------------------------------------
-
 
 app.get("/api/drive/folder/:folderId/files", async (req, res) => {
   try {
@@ -378,17 +390,14 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
     const authHeader = req.headers.authorization;
     const accessToken = authHeader && authHeader.split(" ")[1];
 
-
     if (!accessToken) {
       return res.status(401).json({ error: "Missing access token" });
     }
-
 
     const drive = google.drive({
       version: "v3",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-
 
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
@@ -397,11 +406,8 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
       orderBy: "folder,name",
     });
 
-
     const files = response.data.files || [];
-    // Helper to separate images from general files
     const images = files.filter((f) => f.mimeType && f.mimeType.startsWith("image/"));
-
 
     res.json({ files, images });
   } catch (err) {
@@ -410,34 +416,28 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
   }
 });
 
-
 app.get('/api/drive/file/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
     const token = req.query.token || (req.headers.authorization && req.headers.authorization.split(' ')[1]);
 
-
     if (!token) {
       return res.status(401).send('Missing authorization token');
     }
 
-
     const oauth2Client = new google.auth.OAuth2();
     oauth2Client.setCredentials({ access_token: token });
     const drive = google.drive({ version: 'v3', auth: oauth2Client });
-
 
     const response = await drive.files.get(
       { fileId, alt: 'media' },
       { responseType: 'stream' }
     );
 
-
     if (response.headers['content-type']) {
       res.setHeader('Content-Type', response.headers['content-type']);
     }
     res.setHeader('Cache-Control', 'private, max-age=86400');
-
 
     response.data.pipe(res);
   } catch (error) {
@@ -446,22 +446,18 @@ app.get('/api/drive/file/:fileId', async (req, res) => {
   }
 });
 
-
 // ---------------------------------------------------------------------------
 // Static Asset Serving
 // ---------------------------------------------------------------------------
-
 
 if (process.env.NODE_ENV === 'production') {
   const clientDistPath = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDistPath));
 
-
   app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
-
 
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
