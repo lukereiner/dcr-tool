@@ -310,6 +310,7 @@ export default function DCRReview({
   const [dynamicDropdowns, setDynamicDropdowns] = useState(
     propDropdownOptions || {},
   );
+  const [formLinks, setFormLinks] = useState({ evalFormUrl: "", qcFormUrl: "" });
 
   const [dirtyFields, setDirtyFields] = useState(new Set());
   const [fieldStatuses, setFieldStatuses] = useState({});
@@ -327,7 +328,6 @@ export default function DCRReview({
 
   const [expandedFields, setExpandedFields] = useState({});
 
-  // Contractor dropdown toggle & ref
   const [contractorDropdownOpen, setContractorDropdownOpen] = useState(false);
   const contractorDropdownRef = useRef(null);
 
@@ -346,7 +346,6 @@ export default function DCRReview({
     localStorage.setItem("dcr_drive_view_mode", driveViewMode);
   }, [driveViewMode]);
 
-  // Close contractor dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (
@@ -543,7 +542,6 @@ export default function DCRReview({
     }, 3000);
   };
 
-  // Dedicated toggle for Column AI multi-select
   const handleContractorToggle = (colLetter, contractorName) => {
     const currentVal = formValues[colLetter] ?? "";
     const list = currentVal
@@ -580,6 +578,9 @@ export default function DCRReview({
       setDcrData(data);
       if (data.dropdownOptions) {
         setDynamicDropdowns(data.dropdownOptions);
+      }
+      if (data.formLinks) {
+        setFormLinks(data.formLinks);
       }
       const initialInputs = {};
       data.fields.forEach((f) => {
@@ -852,9 +853,14 @@ export default function DCRReview({
 
         <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
           <a
-            href="https://forms.gle/Vq7dhmYNdWbYwbb46"
-            target="_blank"
-            rel="noopener noreferrer"
+            href={formLinks.evalFormUrl || undefined}
+            target={formLinks.evalFormUrl ? "_blank" : undefined}
+            rel={formLinks.evalFormUrl ? "noopener noreferrer" : undefined}
+            onClick={(e) => {
+              if (!formLinks.evalFormUrl) {
+                e.preventDefault();
+              }
+            }}
             style={{
               padding: "8px 16px",
               background: "#ffffff",
@@ -865,6 +871,7 @@ export default function DCRReview({
               textDecoration: "none",
               display: "inline-block",
               transition: "opacity 0.15s ease",
+              cursor: formLinks.evalFormUrl ? "pointer" : "default",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
@@ -873,9 +880,14 @@ export default function DCRReview({
           </a>
 
           <a
-            href="https://forms.gle/8BmH22qpjA9wvMY66"
-            target="_blank"
-            rel="noopener noreferrer"
+            href={formLinks.qcFormUrl || undefined}
+            target={formLinks.qcFormUrl ? "_blank" : undefined}
+            rel={formLinks.qcFormUrl ? "noopener noreferrer" : undefined}
+            onClick={(e) => {
+              if (!formLinks.qcFormUrl) {
+                e.preventDefault();
+              }
+            }}
             style={{
               padding: "8px 16px",
               background: "#ffffff",
@@ -886,6 +898,7 @@ export default function DCRReview({
               textDecoration: "none",
               display: "inline-block",
               transition: "opacity 0.15s ease",
+              cursor: formLinks.qcFormUrl ? "pointer" : "default",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.9")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
@@ -1629,7 +1642,7 @@ export default function DCRReview({
                 );
               }
 
-              // Other Columns (Z, AE, AG, AL): Single Select Dropdown or Text Input
+              // Other Columns: Single Select Dropdown or Text Input
               const rawOptions =
                 dynamicDropdowns[f.colLetter] &&
                 dynamicDropdowns[f.colLetter].length > 0

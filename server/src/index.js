@@ -100,7 +100,7 @@ async function getUserEmailFromAuth(authHeader) {
     throw new Error('Unable to extract verified email from Google authorization token.');
   }
 
-  cache.set(cacheKey, email, 600); // Cache email resolution for 10 minutes
+  cache.set(cacheKey, email, 600);
   return email;
 }
 
@@ -126,7 +126,7 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   const regionRows = valueRanges[0]?.values || [];
   const userRows = valueRanges[1]?.values || [];
 
-  // Dynamic Header Mapping for RegionConfig (Col A: Region ID, Col B: Region Name, Col C: Spreadsheet ID, Col D: Folder ID)
+  // Dynamic Header Mapping for RegionConfig
   const regHeaders = (regionRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
   let idCol = regHeaders.findIndex(
     (h) => h === 'region id' || (h.includes('id') && !h.includes('sheet') && !h.includes('folder'))
@@ -148,28 +148,26 @@ async function getMasterConfig(sheets, forceRefresh = false) {
       const spreadsheetId = String(row[sheetIdCol] || '').trim();
       const folderId = folderIdCol !== -1 ? String(row[folderIdCol] || '').trim() : '';
 
-      // Skip entries without spreadsheet IDs and exclude the master configuration sheet itself
       if (id && spreadsheetId && id !== 'master' && spreadsheetId !== MASTER_SPREADSHEET_ID) {
         regions.push({ id, name: name || id, spreadsheetId, folderId });
       }
     }
   }
 
-  // Dynamic Header Mapping for UserConfig (Finds Email, Role, and Region columns regardless of Name columns)
+  // Dynamic Header Mapping for UserConfig
   const userHeaders = (userRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
   let emailCol = userHeaders.findIndex((h) => h.includes('email'));
   let roleCol = userHeaders.findIndex((h) => h.includes('role') || h.includes('title'));
   let regionCol = userHeaders.findIndex((h) => h.includes('region'));
 
-  // Intelligent fallback if headers aren't explicitly named
   if (emailCol === -1) {
     if (userRows.length > 1) {
       emailCol = userRows[1].findIndex((val) => String(val || '').includes('@'));
     }
-    if (emailCol === -1) emailCol = 2; // Column C
+    if (emailCol === -1) emailCol = 2;
   }
-  if (roleCol === -1) roleCol = 3;   // Column D
-  if (regionCol === -1) regionCol = 4; // Column E
+  if (roleCol === -1) roleCol = 3;
+  if (regionCol === -1) regionCol = 4;
 
   const users = [];
   if (userRows.length > 1) {
@@ -189,7 +187,7 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   );
 
   const bundle = { regions, users };
-  cache.set(cacheKey, bundle, 300); // Cache master config for 5 minutes
+  cache.set(cacheKey, bundle, 300);
   return bundle;
 }
 
@@ -205,7 +203,6 @@ async function resolveRegionSpreadsheet(req, sheets) {
     throw error;
   }
 
-  // Calculate user's authorized regions
   let userAllowedRegions = [];
   const regionConfigString = (userProfile.regions || '').toUpperCase();
   const roleString = (userProfile.role || '').toUpperCase();
@@ -227,7 +224,6 @@ async function resolveRegionSpreadsheet(req, sheets) {
     throw error;
   }
 
-  // Identify requested region (query param or body)
   const requestedId = (req.query.region || req.body.region || '').trim().toLowerCase();
 
   let targetRegion = null;
@@ -262,23 +258,42 @@ function getColLetter(index) {
   return letter;
 }
 
+// Convert validation sheet rows into options dictionary and extract form links
 function parseValidationRows(valRows) {
   const optionsMap = {
     Z: [],
     AE: [],
     AG: [],
-    AI: [], // Contractor options
+    AI: [],
     AL: [],
   };
 
+  const formLinks = {
+    evalFormUrl: '',
+    qcFormUrl: '',
+  };
 
-  if (!valRows || valRows.length < 2) return optionsMap;
-
+  if (!valRows || valRows.length === 0) {
+    return { dropdownOptions: optionsMap, formLinks };
+  }
 
   const headers = valRows[0] || [];
   const colLetterMapping = {};
 
+  // Extract Form Links from Column F and Column G (by header name or exact column index)
+  let evalColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('eval'));
+  if (evalColIndex === -1) evalColIndex = 5; // Column F default
 
+  let qcColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('qc'));
+  if (qcColIndex === -1) qcColIndex = 6; // Column G default
+
+  if (valRows.length > 1) {
+    const row2 = valRows[1] || [];
+    formLinks.evalFormUrl = String(row2[evalColIndex] || '').trim();
+    formLinks.qcFormUrl = String(row2[qcColIndex] || '').trim();
+  }
+
+  // Parse dropdown options from labeled columns
   headers.forEach((header, colIdx) => {
     const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
     if (matches.length > 0) {
@@ -290,7 +305,6 @@ function parseValidationRows(valRows) {
     }
   });
 
-
   for (let r = 1; r < valRows.length; r++) {
     const row = valRows[r];
     Object.entries(colLetterMapping).forEach(([colIdx, colLetter]) => {
@@ -301,8 +315,7 @@ function parseValidationRows(valRows) {
     });
   }
 
-
-  return optionsMap;
+  return { dropdownOptions: optionsMap, formLinks };
 }
 
 // Fetch region sheet with Data Val tab
@@ -334,8 +347,8 @@ async function getOrFetchSheetWithValidation(sheets, spreadsheetId, regionId, ta
       const values = valueRanges[0]?.values || [];
       const valRows = valueRanges[1]?.values || [];
 
-      const dropdownOptions = parseValidationRows(valRows);
-      const bundle = { values, dropdownOptions };
+      const { dropdownOptions, formLinks } = parseValidationRows(valRows);
+      const bundle = { values, dropdownOptions, formLinks };
 
       cache.set(cacheKey, bundle);
       return bundle;
@@ -386,10 +399,6 @@ app.get('/api/auth/me', async (req, res) => {
       });
     }
 
-    console.log(
-      `[AUTH] User "${userEmail}" authenticated successfully as "${userProfile.role}". Regions: ${allowedRegions.map((r) => r.name).join(', ')}`
-    );
-
     res.json({
       email: userEmail,
       role: userProfile.role,
@@ -416,7 +425,7 @@ app.get('/api/sheet', async (req, res) => {
 
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
-    const { values, dropdownOptions } = await getOrFetchSheetWithValidation(
+    const { values, dropdownOptions, formLinks } = await getOrFetchSheetWithValidation(
       sheets,
       spreadsheetId,
       targetRegion.id,
@@ -424,7 +433,7 @@ app.get('/api/sheet', async (req, res) => {
       forceRefresh
     );
 
-    res.json({ values, dropdownOptions, region: targetRegion });
+    res.json({ values, dropdownOptions, formLinks, region: targetRegion });
   } catch (error) {
     console.error('Error fetching sheet:', error?.response?.data || error.message);
     const status = error.statusCode || error?.response?.status || 500;
@@ -475,7 +484,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
 
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
-    const { values: rows, dropdownOptions } = await getOrFetchSheetWithValidation(
+    const { values: rows, dropdownOptions, formLinks } = await getOrFetchSheetWithValidation(
       sheets,
       spreadsheetId,
       targetRegion.id,
@@ -488,7 +497,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     }
 
     const headers = rows[0];
-    const DCR_COL_INDEX = 24; // Col Y
+    const DCR_COL_INDEX = 24;
 
     let foundIndex = -1;
     for (let i = 1; i < rows.length; i++) {
@@ -519,6 +528,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
       sheetRowNumber,
       fields,
       dropdownOptions,
+      formLinks,
       region: targetRegion,
     });
   } catch (error) {
