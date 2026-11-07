@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useContext } from "react";
+import { useState, useMemo, useEffect, useContext, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../App";
 import { useToast } from "../context/ToastContext";
@@ -100,6 +100,37 @@ export default function Coordinator({
     return [];
   }, [dropdownOptions]);
 
+  const rows = useMemo(() => {
+    if (!sheetData || sheetData.length < 3) return [];
+    return sheetData.slice(2);
+  }, [sheetData]);
+
+  // Combined Contractor options: Data Val list + any comma-separated values found in data rows
+  const contractorOptions = useMemo(() => {
+    const set = new Set();
+
+    // 1. Primary source: Data Val (AI)
+    if (dropdownOptions?.AI && dropdownOptions.AI.length > 0) {
+      dropdownOptions.AI.forEach((c) => {
+        const trimmed = String(c || "").trim();
+        if (trimmed) set.add(trimmed);
+      });
+    }
+
+    // 2. Extra entries parsed from comma-separated row data (Col AI / Index 34)
+    rows.forEach((r) => {
+      const rawContractor = String(r[34] || "").trim();
+      if (rawContractor && rawContractor !== "—") {
+        rawContractor.split(",").forEach((part) => {
+          const item = part.trim();
+          if (item && item !== "—") set.add(item);
+        });
+      }
+    });
+
+    return Array.from(set).sort();
+  }, [dropdownOptions, rows]);
+
   const [selectedStatuses, setSelectedStatuses] = useState(() => {
     try {
       const saved = localStorage.getItem("coordinator_selected_statuses");
@@ -114,6 +145,31 @@ export default function Coordinator({
   const [selectedTech, setSelectedTech] = useState(() => {
     return localStorage.getItem("coordinator_tech") || "All";
   });
+
+  const [selectedContractors, setSelectedContractors] = useState(() => {
+    try {
+      const saved = localStorage.getItem("coordinator_contractors");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [contractorDropdownOpen, setContractorDropdownOpen] = useState(false);
+  const contractorDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        contractorDropdownRef.current &&
+        !contractorDropdownRef.current.contains(e.target)
+      ) {
+        setContractorDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const [pageSize, setPageSize] = useState(() => {
     const saved = localStorage.getItem("coordinator_page_size");
@@ -145,6 +201,14 @@ export default function Coordinator({
   }, [selectedTech]);
 
   useEffect(() => {
+    localStorage.setItem(
+      "coordinator_contractors",
+      JSON.stringify(selectedContractors),
+    );
+    setPage(1);
+  }, [selectedContractors]);
+
+  useEffect(() => {
     localStorage.setItem("coordinator_page_size", String(pageSize));
     setPage(1);
   }, [pageSize]);
@@ -160,6 +224,18 @@ export default function Coordinator({
         ? prev.filter((s) => s !== status)
         : [...prev, status],
     );
+  };
+
+  const toggleContractor = (contractor) => {
+    setSelectedContractors((prev) =>
+      prev.includes(contractor)
+        ? prev.filter((c) => c !== contractor)
+        : [...prev, contractor],
+    );
+  };
+
+  const clearContractors = () => {
+    setSelectedContractors([]);
   };
 
   const handleSortClick = (columnKey) => {
@@ -185,11 +261,7 @@ export default function Coordinator({
     });
   };
 
-  const rows = useMemo(() => {
-    if (!sheetData || sheetData.length < 3) return [];
-    return sheetData.slice(2);
-  }, [sheetData]);
-
+  // KPIs scoped by technician AND comma-separated contractors
   const kpis = useMemo(() => {
     let totalActive = 0;
     let underConstruction = 0;
@@ -198,14 +270,30 @@ export default function Coordinator({
     let unassigned = 0;
     const contractorCounts = {};
 
-    rows.forEach((row) => {
-      const tech = String(row[30] || "").trim(); // Col AE
-      const status = String(row[32] || "").trim(); // Col AG
-      const contractor = String(row[34] || "").trim(); // Col AI
-      const dcrId = String(row[24] || "").trim(); // Col Y
+    const hasContractorFilter = selectedContractors.length > 0;
 
+    rows.forEach((row) => {
+      const tech = String(row[30] || "").trim(); // Col AE[cite: 23]
+      const status = String(row[32] || "").trim(); // Col AG[cite: 23]
+      const rawContractor = String(row[34] || "").trim(); // Col AI[cite: 23]
+      const dcrId = String(row[24] || "").trim(); // Col Y[cite: 23]
+
+      // Filter by technician
       if (selectedTech !== "All" && tech !== selectedTech) {
         return;
+      }
+
+      // Parse comma-separated contractors for this row
+      const rowContractors = rawContractor
+        ? rawContractor.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
+
+      // Filter by multi-selected contractors (match if any selected contractor is present)
+      if (hasContractorFilter) {
+        const matchesContractor = selectedContractors.some((c) =>
+          rowContractors.includes(c),
+        );
+        if (!matchesContractor) return;
       }
 
       if (dcrId && dcrId !== "—" && !status) {
@@ -219,9 +307,12 @@ export default function Coordinator({
       if (status === "Pre Construction") preConstruction++;
       if (status === "Completed") completed++;
 
-      if (contractor) {
-        contractorCounts[contractor] = (contractorCounts[contractor] || 0) + 1;
-      }
+      // Tally individual contractor appearances
+      rowContractors.forEach((c) => {
+        if (c && c !== "—") {
+          contractorCounts[c] = (contractorCounts[c] || 0) + 1;
+        }
+      });
     });
 
     return {
@@ -232,17 +323,20 @@ export default function Coordinator({
       unassigned,
       contractorCounts,
     };
-  }, [rows, selectedTech]);
+  }, [rows, selectedTech, selectedContractors]);
 
+  // Filter rows by status, technician, and comma-separated contractors
   const filteredRows = useMemo(() => {
     const matches = [];
     const hasStatusFilter = selectedStatuses.length > 0;
+    const hasContractorFilter = selectedContractors.length > 0;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const dcrId = String(row[24] || "").trim();
       const tech = String(row[30] || "").trim();
       const status = String(row[32] || "").trim();
+      const rawContractor = String(row[34] || "").trim();
 
       if (!dcrId || dcrId === "—") continue;
 
@@ -263,7 +357,18 @@ export default function Coordinator({
 
       const techMatch = selectedTech === "All" || tech === selectedTech;
 
-      if (statusMatch && techMatch) {
+      // Match comma-separated contractors
+      let contractorMatch = true;
+      if (hasContractorFilter) {
+        const rowContractors = rawContractor
+          ? rawContractor.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
+        contractorMatch = selectedContractors.some((c) =>
+          rowContractors.includes(c),
+        );
+      }
+
+      if (statusMatch && techMatch && contractorMatch) {
         matches.push({
           row,
           sheetRowNumber: i + 3,
@@ -302,7 +407,7 @@ export default function Coordinator({
     }
 
     return matches;
-  }, [rows, selectedStatuses, selectedTech, sortChain]);
+  }, [rows, selectedStatuses, selectedTech, selectedContractors, sortChain]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPageRows = useMemo(() => {
@@ -310,7 +415,6 @@ export default function Coordinator({
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
 
-  // Update status and supply activeRegion
   const handleStatusChange = async (sheetRowNumber, newStatus) => {
     if (!newStatus || newStatus === "Unassigned") return;
     setUpdatingRow(sheetRowNumber);
@@ -375,6 +479,16 @@ export default function Coordinator({
       </span>
     );
   };
+
+  const contractorButtonLabel = useMemo(() => {
+    if (selectedContractors.length === 0) {
+      return "All Contractors";
+    }
+    if (selectedContractors.length === 1) {
+      return selectedContractors[0];
+    }
+    return `Contractors (${selectedContractors.length})`;
+  }, [selectedContractors]);
 
   return (
     <div style={{ maxWidth: "1280px", margin: "0 auto" }}>
@@ -443,6 +557,59 @@ export default function Coordinator({
         }
         .sortable-th:hover {
           background-color: var(--bg-input);
+        }
+
+        .multi-dropdown-btn {
+          width: 200px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 12px;
+          border-radius: 6px;
+          font-size: 13px;
+          cursor: pointer;
+          background: var(--bg-card);
+          color: var(--text-main);
+          border: 1px solid var(--border-color);
+          transition: border-color 0.15s ease;
+          text-align: left;
+        }
+        .multi-dropdown-btn:hover {
+          border-color: var(--btn-primary-bg);
+        }
+
+        .multi-dropdown-popover {
+          position: absolute;
+          top: calc(100% + 4px);
+          left: 0;
+          width: 240px;
+          max-height: 280px;
+          overflow-y: auto;
+          background: var(--bg-card);
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+          z-index: 100;
+          padding: 6px 0;
+        }
+
+        .multi-dropdown-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 14px;
+          font-size: 13px;
+          cursor: pointer;
+          user-select: none;
+          color: var(--text-main);
+          transition: background-color 0.12s ease;
+        }
+        .multi-dropdown-item:hover {
+          background-color: var(--bg-card-subtle);
+        }
+        .multi-dropdown-item.selected {
+          font-weight: 600;
+          color: var(--btn-primary-bg);
         }
       `}</style>
 
@@ -663,7 +830,7 @@ export default function Coordinator({
           border: "1px solid var(--border-color)",
           borderRadius: "8px",
           boxShadow: "var(--shadow-card)",
-          overflow: "hidden",
+          overflow: "visible",
         }}
       >
         <div
@@ -676,6 +843,7 @@ export default function Coordinator({
             gap: "16px",
           }}
         >
+          {/* Status Filter Pills */}
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {[...statusOptions, "Unassigned"].map((status) => {
               const active = selectedStatuses.includes(status);
@@ -692,29 +860,125 @@ export default function Coordinator({
             })}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <label
-              style={{
-                fontSize: "13px",
-                fontWeight: 600,
-                color: "var(--text-main)",
-              }}
+          {/* Filter Cluster: Technician & Contractor */}
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+            {/* Technician Single-Select */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <label
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--text-main)",
+                }}
+              >
+                Technician:
+              </label>
+              <select
+                value={selectedTech}
+                onChange={(e) => setSelectedTech(e.target.value)}
+                className="dcr-select"
+                style={{ minWidth: "170px" }}
+              >
+                <option value="All">All Technicians</option>
+                {techOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Contractor Multi-Select Dropdown */}
+            <div
+              ref={contractorDropdownRef}
+              style={{ position: "relative", display: "flex", alignItems: "center", gap: "8px" }}
             >
-              Technician:
-            </label>
-            <select
-              value={selectedTech}
-              onChange={(e) => setSelectedTech(e.target.value)}
-              className="dcr-select"
-              style={{ minWidth: "200px" }}
-            >
-              <option value="All">All Technicians</option>
-              {techOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              <label
+                style={{
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  color: "var(--text-main)",
+                }}
+              >
+                Contractor:
+              </label>
+              <button
+                type="button"
+                onClick={() => setContractorDropdownOpen((prev) => !prev)}
+                className="multi-dropdown-btn"
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    maxWidth: "165px",
+                  }}
+                >
+                  {contractorButtonLabel}
+                </span>
+                <span style={{ fontSize: "10px", opacity: 0.6, marginLeft: "4px" }}>
+                  {contractorDropdownOpen ? "▲" : "▼"}
+                </span>
+              </button>
+
+              {contractorDropdownOpen && (
+                <div className="multi-dropdown-popover">
+                  {selectedContractors.length > 0 && (
+                    <div
+                      style={{
+                        padding: "4px 14px 8px 14px",
+                        borderBottom: "1px solid var(--border-subtle)",
+                        display: "flex",
+                        justifyContent: "flex-end",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={clearContractors}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--btn-primary-bg)",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  )}
+
+                  {contractorOptions.length === 0 ? (
+                    <div style={{ padding: "12px 14px", fontSize: "12px", color: "var(--text-subtle)" }}>
+                      No contractors found
+                    </div>
+                  ) : (
+                    contractorOptions.map((contractor) => {
+                      const isSelected = selectedContractors.includes(contractor);
+                      return (
+                        <div
+                          key={contractor}
+                          onClick={() => toggleContractor(contractor)}
+                          className={`multi-dropdown-item ${isSelected ? "selected" : ""}`}
+                        >
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {contractor}
+                          </span>
+                          {isSelected && (
+                            <span style={{ color: "#16a34a", fontWeight: 700, marginLeft: "8px" }}>
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -843,7 +1107,7 @@ export default function Coordinator({
                   >
                     {loading
                       ? `Loading records for ${activeRegion?.name || "region"}...`
-                      : `No records found matching the active status and technician filters.`}
+                      : `No records found matching the active status, technician, and contractor filters.`}
                   </td>
                 </tr>
               ) : (

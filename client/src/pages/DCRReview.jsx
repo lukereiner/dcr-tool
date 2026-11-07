@@ -168,11 +168,9 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
     transition: "all 0.2s ease",
   };
 
-
   return (
     <>
       <style>{`
-        /* Light mode default */
         .autosave-pill {
           background: var(--bg-card);
           color: var(--text-main);
@@ -190,21 +188,19 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
           box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.2);
         }
 
-
-        /* Dark mode brightness boost */
         [data-theme='dark'] .autosave-pill {
           background: #1e2530;
           border: 1px solid #3b4554;
           box-shadow: 0 0 8px rgba(0, 0, 0, 0.35);
         }
         [data-theme='dark'] .autosave-pill .pill-text {
-          color: #e2e8f0; /* Crisp bright gray/white text */
+          color: #e2e8f0;
         }
         [data-theme='dark'] .autosave-pill .check-icon {
-          color: #4ade80; /* Vibrant neon green */
+          color: #4ade80;
         }
         [data-theme='dark'] .autosave-pill .dirty-dot {
-          background: #facc15; /* Brighter glowing yellow */
+          background: #facc15;
           box-shadow: 0 0 6px rgba(250, 204, 21, 0.5);
         }
         [data-theme='dark'] .autosave-pill-error {
@@ -215,7 +211,6 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
           color: #fca5a5 !important;
         }
       `}</style>
-
 
       {status === "saving" && (
         <div className="autosave-pill" style={baseStyle}>
@@ -234,7 +229,6 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
         </div>
       )}
 
-
       {status === "dirty" && (
         <div className="autosave-pill" style={baseStyle}>
           <span
@@ -249,7 +243,6 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
           <span className="pill-text">Unsaved changes</span>
         </div>
       )}
-
 
       {status === "error" && (
         <div
@@ -282,7 +275,6 @@ function AutoSaveHeaderStatus({ status, onRetry }) {
           </button>
         </div>
       )}
-
 
       {(status === "idle" || status === "saved" || !status) && (
         <div className="autosave-pill" style={baseStyle}>
@@ -335,6 +327,10 @@ export default function DCRReview({
 
   const [expandedFields, setExpandedFields] = useState({});
 
+  // Contractor dropdown toggle & ref
+  const [contractorDropdownOpen, setContractorDropdownOpen] = useState(false);
+  const contractorDropdownRef = useRef(null);
+
   const [photos, setPhotos] = useState([]);
   const [folderFiles, setFolderFiles] = useState([]);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -349,6 +345,20 @@ export default function DCRReview({
   useEffect(() => {
     localStorage.setItem("dcr_drive_view_mode", driveViewMode);
   }, [driveViewMode]);
+
+  // Close contractor dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (
+        contractorDropdownRef.current &&
+        !contractorDropdownRef.current.contains(e.target)
+      ) {
+        setContractorDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const toggleFieldExpand = (colLetter) => {
     setExpandedFields((prev) => ({
@@ -369,7 +379,6 @@ export default function DCRReview({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  // Execute batch auto-save scoped to activeRegion
   const executeBatchSave = useCallback(async () => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -532,6 +541,23 @@ export default function DCRReview({
     debounceTimerRef.current = setTimeout(() => {
       executeBatchSave();
     }, 3000);
+  };
+
+  // Dedicated toggle for Column AI multi-select
+  const handleContractorToggle = (colLetter, contractorName) => {
+    const currentVal = formValues[colLetter] ?? "";
+    const list = currentVal
+      ? currentVal.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    let updated;
+    if (list.includes(contractorName)) {
+      updated = list.filter((c) => c !== contractorName);
+    } else {
+      updated = [...list, contractorName];
+    }
+
+    handleFieldChange(colLetter, updated.join(", "));
   };
 
   const loadDcr = async (force = false) => {
@@ -719,6 +745,64 @@ export default function DCRReview({
         }
         .spec-expand-btn:hover {
           text-decoration: underline;
+        }
+
+        .dcr-multi-select-btn {
+          width: 100%;
+          min-height: 38px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          border-radius: 6px;
+          font-size: 14px;
+          cursor: pointer;
+          background: var(--bg-card);
+          color: var(--text-main);
+          border: 1px solid var(--border-color);
+          text-align: left;
+          transition: border-color 0.15s ease;
+          box-sizing: border-box;
+          white-space: normal;
+          word-break: break-word;
+          line-height: 1.4;
+        }
+        .dcr-multi-select-btn:hover {
+          border-color: var(--btn-primary-bg);
+        }
+
+        .dcr-multi-select-popover {
+          position: absolute;
+          top: calc(100% + 4px);
+          left: 0;
+          width: 100%;
+          max-height: 260px;
+          overflow-y: auto;
+          background: var(--bg-card);
+          border: 1px solid var(--border-color);
+          border-radius: 6px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+          z-index: 50;
+          padding: 4px 0;
+        }
+
+        .dcr-multi-select-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          font-size: 13px;
+          cursor: pointer;
+          user-select: none;
+          color: var(--text-main);
+          transition: background-color 0.12s ease;
+        }
+        .dcr-multi-select-item:hover {
+          background-color: var(--bg-card-subtle);
+        }
+        .dcr-multi-select-item.selected {
+          font-weight: 600;
+          color: var(--btn-primary-bg);
         }
       `}</style>
 
@@ -1457,6 +1541,95 @@ export default function DCRReview({
             }}
           >
             {postSpecsFields.map((f) => {
+              const currentValue = formValues[f.colLetter] ?? "";
+
+              // Column AI: Strict Data Val Multi-Select Dropdown with line wrapping
+              if (f.colLetter === "AI") {
+                const contractorOptions =
+                  (dynamicDropdowns?.AI && dynamicDropdowns.AI.length > 0
+                    ? dynamicDropdowns.AI
+                    : propDropdownOptions?.AI) || [];
+
+                const selectedList = currentValue
+                  ? currentValue.split(",").map((s) => s.trim()).filter(Boolean)
+                  : [];
+
+                return (
+                  <div
+                    key={f.colLetter}
+                    ref={contractorDropdownRef}
+                    style={{
+                      background: "var(--bg-card-subtle)",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-subtle)",
+                      position: "relative",
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                        marginBottom: "6px",
+                        color: "var(--text-main)",
+                      }}
+                    >
+                      <span>
+                        {f.header} ({f.colLetter})
+                      </span>
+                      <FieldIndicator status={fieldStatuses[f.colLetter]} />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => setContractorDropdownOpen((prev) => !prev)}
+                      className="dcr-multi-select-btn"
+                    >
+                      <span style={{ flex: 1, paddingRight: "8px" }}>
+                        {selectedList.length === 0
+                          ? "- Select Contractor(s) -"
+                          : selectedList.join(", ")}
+                      </span>
+                      <span style={{ fontSize: "10px", opacity: 0.6, flexShrink: 0 }}>
+                        {contractorDropdownOpen ? "▲" : "▼"}
+                      </span>
+                    </button>
+
+                    {contractorDropdownOpen && (
+                      <div className="dcr-multi-select-popover">
+                        {contractorOptions.length === 0 ? (
+                          <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--text-subtle)" }}>
+                            No options in Data Val
+                          </div>
+                        ) : (
+                          contractorOptions.map((opt) => {
+                            const isSelected = selectedList.includes(opt);
+                            return (
+                              <div
+                                key={opt}
+                                onClick={() => handleContractorToggle(f.colLetter, opt)}
+                                className={`dcr-multi-select-item ${isSelected ? "selected" : ""}`}
+                              >
+                                <span>{opt}</span>
+                                {isSelected && (
+                                  <span style={{ color: "#16a34a", fontWeight: 700, marginLeft: "8px" }}>
+                                    ✓
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              // Other Columns (Z, AE, AG, AL): Single Select Dropdown or Text Input
               const rawOptions =
                 dynamicDropdowns[f.colLetter] &&
                 dynamicDropdowns[f.colLetter].length > 0
@@ -1466,8 +1639,6 @@ export default function DCRReview({
                       propDropdownOptions[f.colLetter].length > 0
                     ? propDropdownOptions[f.colLetter]
                     : DROPDOWN_FIELD_OPTIONS[f.colLetter];
-
-              const currentValue = formValues[f.colLetter] ?? "";
 
               let dropdownOptions = null;
               if (rawOptions && rawOptions.length > 0) {

@@ -12,6 +12,7 @@ import Data from "./pages/Data";
 import DCRReview from "./pages/DCRReview";
 import RefreshButton from "./components/RefreshButton";
 import { ToastProvider, useToast } from "./context/ToastContext";
+import { FaGoogle } from 'react-icons/fa'
 
 export const AuthContext = createContext(null);
 
@@ -151,6 +152,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             width: "100%",
           }}
         >
+          <FaGoogle />
           Sign in with Google
         </button>
       </div>

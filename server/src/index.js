@@ -267,13 +267,17 @@ function parseValidationRows(valRows) {
     Z: [],
     AE: [],
     AG: [],
+    AI: [], // Contractor options
     AL: [],
   };
 
+
   if (!valRows || valRows.length < 2) return optionsMap;
+
 
   const headers = valRows[0] || [];
   const colLetterMapping = {};
+
 
   headers.forEach((header, colIdx) => {
     const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
@@ -286,6 +290,7 @@ function parseValidationRows(valRows) {
     }
   });
 
+
   for (let r = 1; r < valRows.length; r++) {
     const row = valRows[r];
     Object.entries(colLetterMapping).forEach(([colIdx, colLetter]) => {
@@ -295,6 +300,7 @@ function parseValidationRows(valRows) {
       }
     });
   }
+
 
   return optionsMap;
 }
