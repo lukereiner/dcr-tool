@@ -9,6 +9,14 @@ function extractDriveFolderId(text) {
   return match ? match[1] : null;
 }
 
+// Helper function to decode HTML entities (e.g., &amp; -> &) returned by Google
+function decodeHtmlEntities(text) {
+  if (!text || typeof text !== "string") return "";
+  const txt = document.createElement("textarea");
+  txt.innerHTML = text;
+  return txt.value;
+}
+
 const DROPDOWN_FIELD_OPTIONS = {
   Z: ["Approved", "Denied"],
   AE: [
@@ -311,6 +319,8 @@ export default function DCRReview({
     propDropdownOptions || {},
   );
   const [formLinks, setFormLinks] = useState({ evalFormUrl: "", qcFormUrl: "" });
+  const [comments, setComments] = useState([]);
+  const [commentsDrawerOpen, setCommentsDrawerOpen] = useState(false);
 
   const [dirtyFields, setDirtyFields] = useState(new Set());
   const [fieldStatuses, setFieldStatuses] = useState({});
@@ -558,6 +568,18 @@ export default function DCRReview({
     handleFieldChange(colLetter, updated.join(", "));
   };
 
+  const handleHighlightField = (colLetter) => {
+    const el = document.getElementById(`field-card-${colLetter}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("field-highlight-pulse");
+      void el.offsetWidth;
+      el.classList.add("field-highlight-pulse");
+    } else {
+      showToast(`Field Column ${colLetter} is not visible in current review layout`, "info");
+    }
+  };
+
   const loadDcr = async (force = false) => {
     if (!accessToken || !activeRegion) return;
     setLoading(true);
@@ -581,6 +603,9 @@ export default function DCRReview({
       }
       if (data.formLinks) {
         setFormLinks(data.formLinks);
+      }
+      if (data.comments) {
+        setComments(data.comments);
       }
       const initialInputs = {};
       data.fields.forEach((f) => {
@@ -701,8 +726,17 @@ export default function DCRReview({
   const commentsField = dcrData.fields.find((f) => f.colLetter === "AR");
   const activePhoto = photos[activePhotoIndex];
 
+  const activeComments = comments.filter((c) => !c.resolved);
+
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <div
+      style={{
+        padding: "24px",
+        maxWidth: commentsDrawerOpen ? "1600px" : "1200px",
+        margin: "0 auto",
+        transition: "max-width 0.2s ease",
+      }}
+    >
       <style>{`
         @keyframes btnSpin {
           0% { transform: rotate(0deg); }
@@ -714,6 +748,18 @@ export default function DCRReview({
           to { opacity: 1; transform: scale(1); }
         }
 
+        @keyframes pulseBorder {
+          0% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(26, 115, 232, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0); }
+        }
+
+        .field-highlight-pulse {
+          animation: pulseBorder 1.8s ease-out;
+          border-color: var(--btn-primary-bg, #1a73e8) !important;
+        }
+
+        /* Section 2 Clamping & Seamless Text Link Expansion */
         .spec-header-clamped {
           display: -webkit-box;
           -webkit-line-clamp: 2;
@@ -736,40 +782,40 @@ export default function DCRReview({
           background: none;
           border: none;
           padding: 0;
-          color: var(--btn-primary-bg);
+          color: var(--btn-primary-bg, #1a73e8);
           font-size: 11px;
           font-weight: 600;
           cursor: pointer;
           display: inline-flex;
           align-items: center;
           gap: 2px;
+          outline: none;
         }
         .spec-expand-btn:hover {
           text-decoration: underline;
         }
 
+        /* Section 4 Multi-Select Contractor Dropdown Styling */
         .dcr-multi-select-btn {
           width: 100%;
           min-height: 38px;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px;
+          padding: 6px 12px;
           border-radius: 6px;
-          font-size: 14px;
+          font-size: 13px;
           cursor: pointer;
-          background: var(--bg-card);
-          color: var(--text-main);
-          border: 1px solid var(--border-color);
+          background: var(--bg-card, #ffffff);
+          color: var(--text-main, #202124);
+          border: 1px solid var(--border-color, #dadce0);
           text-align: left;
-          transition: border-color 0.15s ease;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
           box-sizing: border-box;
-          white-space: normal;
-          word-break: break-word;
-          line-height: 1.4;
+          outline: none;
         }
         .dcr-multi-select-btn:hover {
-          border-color: var(--btn-primary-bg);
+          border-color: var(--btn-primary-bg, #1a73e8);
         }
 
         .dcr-multi-select-popover {
@@ -777,33 +823,51 @@ export default function DCRReview({
           top: calc(100% + 4px);
           left: 0;
           width: 100%;
-          max-height: 260px;
+          max-height: 240px;
           overflow-y: auto;
-          background: var(--bg-card);
-          border: 1px solid var(--border-color);
+          background: var(--bg-card, #ffffff);
+          border: 1px solid var(--border-color, #dadce0);
           border-radius: 6px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-          z-index: 50;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+          z-index: 100;
           padding: 4px 0;
+          box-sizing: border-box;
         }
 
         .dcr-multi-select-item {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px;
+          padding: 7px 12px;
           font-size: 13px;
           cursor: pointer;
           user-select: none;
-          color: var(--text-main);
+          color: var(--text-main, #202124);
           transition: background-color 0.12s ease;
         }
         .dcr-multi-select-item:hover {
-          background-color: var(--bg-card-subtle);
+          background-color: var(--bg-card-subtle, #f8f9fa);
         }
         .dcr-multi-select-item.selected {
-          font-weight: 600;
-          color: var(--btn-primary-bg);
+          font-weight: 500;
+          color: var(--btn-primary-bg, #1a73e8);
+        }
+
+        [data-theme='dark'] .dcr-multi-select-btn {
+          background: #1e2530;
+          border-color: #3b4554;
+          color: #e2e8f0;
+        }
+        [data-theme='dark'] .dcr-multi-select-popover {
+          background: #1e2530;
+          border-color: #3b4554;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+        [data-theme='dark'] .dcr-multi-select-item:hover {
+          background-color: #273142;
+        }
+        [data-theme='dark'] .dcr-multi-select-item.selected {
+          color: #60a5fa;
         }
       `}</style>
 
@@ -814,6 +878,8 @@ export default function DCRReview({
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: "20px",
+          gap: "12px",
+          flexWrap: "wrap",
         }}
       >
         <button
@@ -823,10 +889,37 @@ export default function DCRReview({
           ← Back to All Records
         </button>
 
-        <AutoSaveHeaderStatus
-          status={globalStatus}
-          onRetry={executeBatchSave}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* Toggle Activity & Comments Sidebar */}
+          <button
+            type="button"
+            onClick={() => setCommentsDrawerOpen((prev) => !prev)}
+            className="btn-secondary"
+            style={{
+              padding: "6px 14px",
+              borderRadius: "20px",
+              fontSize: "13px",
+              fontWeight: 600,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              borderColor: activeComments.length > 0 ? "#f59e0b" : "var(--border-color)",
+              background:
+                activeComments.length > 0
+                  ? "rgba(245, 158, 11, 0.12)"
+                  : "var(--bg-card)",
+              color: activeComments.length > 0 ? "#d97706" : "var(--text-main)",
+            }}
+          >
+            <span>💬</span>
+            <span>Comments ({comments.length})</span>
+          </button>
+
+          <AutoSaveHeaderStatus
+            status={globalStatus}
+            onRetry={executeBatchSave}
+          />
+        </div>
       </div>
 
       {/* Header Banner */}
@@ -857,9 +950,7 @@ export default function DCRReview({
             target={formLinks.evalFormUrl ? "_blank" : undefined}
             rel={formLinks.evalFormUrl ? "noopener noreferrer" : undefined}
             onClick={(e) => {
-              if (!formLinks.evalFormUrl) {
-                e.preventDefault();
-              }
+              if (!formLinks.evalFormUrl) e.preventDefault();
             }}
             style={{
               padding: "8px 16px",
@@ -884,9 +975,7 @@ export default function DCRReview({
             target={formLinks.qcFormUrl ? "_blank" : undefined}
             rel={formLinks.qcFormUrl ? "noopener noreferrer" : undefined}
             onClick={(e) => {
-              if (!formLinks.qcFormUrl) {
-                e.preventDefault();
-              }
+              if (!formLinks.qcFormUrl) e.preventDefault();
             }}
             style={{
               padding: "8px 16px",
@@ -908,767 +997,54 @@ export default function DCRReview({
         </div>
       </div>
 
-      {/* Section 1: Manager Sign-offs (Columns A & B) */}
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "8px",
-          padding: "16px 20px",
-          marginBottom: "24px",
-          boxShadow: "var(--shadow-card)",
-        }}
-      >
-        <h3
-          style={{
-            margin: "0 0 12px 0",
-            color: "var(--btn-primary-bg)",
-            fontSize: "16px",
-          }}
-        >
-          Manager Approval & Sign-Off (Cols A & B)
-        </h3>
+      {/* 70/30 Split Layout Container */}
+      <div style={{ display: "flex", gap: "24px", alignItems: "flex-start", width: "100%" }}>
+        {/* Left Pane (70% when drawer open, 100% when closed) */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: "16px",
+            flex: commentsDrawerOpen ? "0 0 70%" : "1 1 100%",
+            maxWidth: commentsDrawerOpen ? "70%" : "100%",
+            minWidth: 0,
+            transition: "flex 0.2s ease, max-width 0.2s ease",
           }}
         >
-          {managerSignOffs.map((f) => (
-            <div
-              key={f.colLetter}
-              style={{
-                background: "var(--bg-card-subtle)",
-                padding: "12px",
-                borderRadius: "6px",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  marginBottom: "6px",
-                  color: "var(--text-main)",
-                }}
-              >
-                <span>
-                  {f.header} ({f.colLetter})
-                </span>
-                <FieldIndicator status={fieldStatuses[f.colLetter]} />
-              </label>
-              <input
-                type="text"
-                className="dcr-input"
-                value={formValues[f.colLetter] ?? ""}
-                onChange={(e) => handleFieldChange(f.colLetter, e.target.value)}
-                style={{ width: "100%" }}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Section 2: Locked Form Specs */}
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "8px",
-          padding: "16px 20px",
-          marginBottom: "24px",
-          boxShadow: "var(--shadow-card)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "14px",
-          }}
-        >
-          <h3
-            style={{ margin: 0, fontSize: "16px", color: "var(--text-main)" }}
-          >
-            Locked DCR Form Data (Cols C through Y)
-          </h3>
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: "12px",
-            alignItems: "stretch",
-          }}
-        >
-          {readOnlySpecs.map((f) => {
-            const isExpanded = !!expandedFields[f.colLetter];
-            const textValue = String(f.value || "");
-            const isLong =
-              textValue.length > 55 || textValue.split("\n").length > 2;
-
-            return (
-              <div
-                key={f.colLetter}
-                style={{
-                  background: "var(--bg-card-subtle)",
-                  border: "1px solid var(--border-subtle)",
-                  padding: "12px",
-                  borderRadius: "6px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  height: "100%",
-                  boxSizing: "border-box",
-                }}
-              >
-                <div
-                  className="spec-header-clamped"
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--text-subtle)",
-                    textTransform: "uppercase",
-                    marginBottom: "10px",
-                  }}
-                  title={`${f.header} (${f.colLetter})`}
-                >
-                  {f.header} ({f.colLetter})
-                </div>
-
-                <div style={{ marginTop: "auto" }}>
-                  {isLong && !isExpanded ? (
-                    <div
-                      style={{
-                        position: "relative",
-                        lineHeight: "1.4",
-                        maxHeight: "2.8em",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        className="spec-value-clamped"
-                        style={{
-                          fontSize: "14px",
-                          fontWeight: 500,
-                          wordBreak: "break-word",
-                          color: f.value
-                            ? "var(--text-main)"
-                            : "var(--text-subtle)",
-                          lineHeight: "1.4",
-                          paddingRight: "62px",
-                        }}
-                      >
-                        {f.value || "—"}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggleFieldExpand(f.colLetter)}
-                        className="spec-expand-btn"
-                        style={{
-                          position: "absolute",
-                          right: 0,
-                          bottom: 0,
-                          background: "var(--bg-card-subtle)",
-                          paddingLeft: "6px",
-                          lineHeight: "1.4",
-                        }}
-                      >
-                        More ▼
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <div
-                        style={{
-                          fontSize: "14px",
-                          fontWeight: 500,
-                          wordBreak: "break-word",
-                          color: f.value
-                            ? "var(--text-main)"
-                            : "var(--text-subtle)",
-                          lineHeight: "1.4",
-                        }}
-                      >
-                        {f.value || "—"}
-                      </div>
-                      {isLong && isExpanded && (
-                        <button
-                          type="button"
-                          onClick={() => toggleFieldExpand(f.colLetter)}
-                          className="spec-expand-btn"
-                          style={{ marginTop: "4px" }}
-                        >
-                          Less ▲
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Section 3: Media & Drive Folder Explorer */}
-      <div
-        style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "8px",
-          padding: "20px",
-          marginBottom: "24px",
-          boxShadow: "var(--shadow-card)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "16px",
-            flexWrap: "wrap",
-            gap: "10px",
-          }}
-        >
+          {/* Section 1: Manager Sign-offs (Columns A & B) */}
           <div
             style={{
-              display: "inline-flex",
-              background: "var(--bg-card-subtle)",
-              padding: "3px",
-              borderRadius: "24px",
+              background: "var(--bg-card)",
               border: "1px solid var(--border-color)",
+              borderRadius: "8px",
+              padding: "16px 20px",
+              marginBottom: "24px",
+              boxShadow: "var(--shadow-card)",
             }}
           >
-            <button
-              type="button"
-              onClick={() => setDriveViewMode("photos")}
+            <h3
               style={{
-                border: "none",
-                outline: "none",
-                cursor: "pointer",
-                padding: "6px 18px",
-                borderRadius: "20px",
-                fontSize: "13px",
-                fontWeight: 600,
-                transition: "all 0.2s ease",
-                background:
-                  driveViewMode === "photos"
-                    ? "var(--btn-primary-bg)"
-                    : "transparent",
-                color:
-                  driveViewMode === "photos" ? "#ffffff" : "var(--text-muted)",
+                margin: "0 0 12px 0",
+                color: "var(--btn-primary-bg)",
+                fontSize: "16px",
               }}
             >
-              Photos
-            </button>
-            <button
-              type="button"
-              onClick={() => setDriveViewMode("files")}
-              style={{
-                border: "none",
-                outline: "none",
-                cursor: "pointer",
-                padding: "6px 18px",
-                borderRadius: "20px",
-                fontSize: "13px",
-                fontWeight: 600,
-                transition: "all 0.2s ease",
-                background:
-                  driveViewMode === "files"
-                    ? "var(--btn-primary-bg)"
-                    : "transparent",
-                color:
-                  driveViewMode === "files" ? "#ffffff" : "var(--text-muted)",
-              }}
-            >
-              Files
-            </button>
-          </div>
-
-          {folderUrl && (
-            <a
-              href={folderUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-secondary"
-              style={{
-                textDecoration: "none",
-                borderRadius: "16px",
-                fontSize: "12px",
-                fontWeight: 600,
-              }}
-            >
-              📁 Open Folder in Google Drive ↗
-            </a>
-          )}
-        </div>
-
-        {photosLoading ? (
-          <div
-            style={{
-              padding: "40px",
-              textAlign: "center",
-              color: "var(--text-muted)",
-              background: "var(--bg-card-subtle)",
-              borderRadius: "6px",
-            }}
-          >
-            Loading folder contents from Google Drive...
-          </div>
-        ) : driveViewMode === "photos" ? (
-          photos.length === 0 ? (
+              Manager Approval & Sign-Off (Cols A & B)
+            </h3>
             <div
               style={{
-                padding: "30px",
-                textAlign: "center",
-                color: "var(--text-subtle)",
-                background: "var(--bg-card-subtle)",
-                borderRadius: "6px",
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "16px",
               }}
             >
-              {folderUrl
-                ? "No photo files found in this folder."
-                : "No photo folder attached to this DCR."}
-            </div>
-          ) : (
-            <div>
-              <div
-                style={{
-                  position: "relative",
-                  background: "#0a0a0a",
-                  borderRadius: "8px",
-                  height: "460px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  overflow: "hidden",
-                }}
-              >
-                <button
-                  onClick={() =>
-                    setActivePhotoIndex((prev) =>
-                      prev > 0 ? prev - 1 : photos.length - 1,
-                    )
-                  }
-                  style={{
-                    position: "absolute",
-                    left: "16px",
-                    zIndex: 2,
-                    background: "rgba(0,0,0,0.6)",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "50%",
-                    width: "40px",
-                    height: "40px",
-                    cursor: "pointer",
-                    fontSize: "18px",
-                  }}
-                >
-                  ◀
-                </button>
-
-                <img
-                  src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
-                  alt={activePhoto.name}
-                  onClick={() => setLightboxOpen(true)}
-                  style={{
-                    maxHeight: "100%",
-                    maxWidth: "100%",
-                    objectFit: "contain",
-                    cursor: "zoom-in",
-                  }}
-                  title="Click to view full screen"
-                />
-
-                <button
-                  onClick={() =>
-                    setActivePhotoIndex((prev) =>
-                      prev < photos.length - 1 ? prev + 1 : 0,
-                    )
-                  }
-                  style={{
-                    position: "absolute",
-                    right: "16px",
-                    zIndex: 2,
-                    background: "rgba(0,0,0,0.6)",
-                    color: "#ffffff",
-                    border: "none",
-                    borderRadius: "50%",
-                    width: "40px",
-                    height: "40px",
-                    cursor: "pointer",
-                    fontSize: "18px",
-                  }}
-                >
-                  ▶
-                </button>
-
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: "12px",
-                    background: "rgba(0,0,0,0.75)",
-                    color: "#ffffff",
-                    padding: "4px 14px",
-                    borderRadius: "16px",
-                    fontSize: "12px",
-                    zIndex: 2,
-                    pointerEvents: "none",
-                  }}
-                >
-                  {activePhoto.name} ({activePhotoIndex + 1} of {photos.length})
-                </div>
-              </div>
-
-              {/* Thumbnails */}
-              <div
-                style={{
-                  display: "flex",
-                  gap: "8px",
-                  overflowX: "auto",
-                  marginTop: "12px",
-                  paddingBottom: "6px",
-                }}
-              >
-                {photos.map((photo, idx) => (
-                  <div
-                    key={photo.id}
-                    onClick={() => setActivePhotoIndex(idx)}
-                    style={{
-                      flexShrink: 0,
-                      width: "80px",
-                      height: "60px",
-                      borderRadius: "4px",
-                      overflow: "hidden",
-                      cursor: "pointer",
-                      border:
-                        idx === activePhotoIndex
-                          ? "2px solid var(--btn-primary-bg)"
-                          : "1px solid var(--border-color)",
-                      opacity: idx === activePhotoIndex ? 1 : 0.6,
-                    }}
-                  >
-                    <img
-                      src={`/api/drive/file/${photo.id}?token=${encodeURIComponent(accessToken)}`}
-                      alt={photo.name}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        ) : folderFiles.length === 0 ? (
-          <div
-            style={{
-              padding: "30px",
-              textAlign: "center",
-              color: "var(--text-subtle)",
-              background: "var(--bg-card-subtle)",
-              borderRadius: "6px",
-            }}
-          >
-            No files found in this Google Drive folder.
-          </div>
-        ) : (
-          <div
-            style={{
-              maxHeight: "460px",
-              overflowY: "auto",
-              border: "1px solid var(--border-subtle)",
-              borderRadius: "6px",
-            }}
-          >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: "13px",
-                textAlign: "left",
-              }}
-            >
-              <thead
-                style={{
-                  background: "var(--bg-card-subtle)",
-                  borderBottom: "1px solid var(--border-color)",
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 1,
-                }}
-              >
-                <tr>
-                  <th style={{ padding: "10px 14px", width: "80px" }}>Type</th>
-                  <th style={{ padding: "10px 14px" }}>File Name</th>
-                  <th
-                    style={{
-                      padding: "10px 14px",
-                      width: "210px",
-                      textAlign: "right",
-                    }}
-                  >
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {folderFiles.map((file) => {
-                  const badge = getFileBadge(file.mimeType, file.name);
-                  const isDark =
-                    document.documentElement.getAttribute("data-theme") ===
-                    "dark";
-                  const isImg = file.mimeType?.startsWith("image/");
-
-                  return (
-                    <tr
-                      key={file.id}
-                      className="dcr-table-row"
-                      style={{ borderBottom: "1px solid var(--border-subtle)" }}
-                    >
-                      <td style={{ padding: "10px 14px" }}>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            padding: "2px 8px",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            fontWeight: 700,
-                            background: isDark ? badge.darkBg : badge.bg,
-                            color: isDark ? badge.darkText : badge.text,
-                          }}
-                        >
-                          {badge.label}
-                        </span>
-                      </td>
-                      <td
-                        style={{
-                          padding: "10px 14px",
-                          fontWeight: 500,
-                          color: "var(--text-main)",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {file.name}
-                      </td>
-                      <td
-                        style={{
-                          padding: "10px 14px",
-                          textAlign: "right",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            gap: "8px",
-                          }}
-                        >
-                          {isImg && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const photoIdx = photos.findIndex(
-                                  (p) => p.id === file.id,
-                                );
-                                if (photoIdx !== -1)
-                                  setActivePhotoIndex(photoIdx);
-                                setDriveViewMode("photos");
-                              }}
-                              className="btn-secondary"
-                              style={{
-                                padding: "4px 10px",
-                                fontSize: "12px",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              View Photo
-                            </button>
-                          )}
-                          <a
-                            href={
-                              file.webViewLink ||
-                              `https://drive.google.com/file/d/${file.id}/view`
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="btn-secondary"
-                            style={{
-                              padding: "4px 10px",
-                              fontSize: "12px",
-                              textDecoration: "none",
-                              whiteSpace: "nowrap",
-                              display: "inline-flex",
-                              alignItems: "center",
-                            }}
-                          >
-                            Open ↗
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Section 4: Post-Spec Processing Fields */}
-      {postSpecsFields.length > 0 && (
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-color)",
-            borderRadius: "8px",
-            padding: "16px 20px",
-            marginBottom: "24px",
-            boxShadow: "var(--shadow-card)",
-          }}
-        >
-          <h3
-            style={{
-              margin: "0 0 12px 0",
-              fontSize: "16px",
-              color: "var(--text-main)",
-            }}
-          >
-            Downstream Processing & Workday Tracking (Col Z+)
-          </h3>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "16px",
-            }}
-          >
-            {postSpecsFields.map((f) => {
-              const currentValue = formValues[f.colLetter] ?? "";
-
-              // Column AI: Strict Data Val Multi-Select Dropdown with line wrapping
-              if (f.colLetter === "AI") {
-                const contractorOptions =
-                  (dynamicDropdowns?.AI && dynamicDropdowns.AI.length > 0
-                    ? dynamicDropdowns.AI
-                    : propDropdownOptions?.AI) || [];
-
-                const selectedList = currentValue
-                  ? currentValue.split(",").map((s) => s.trim()).filter(Boolean)
-                  : [];
-
-                return (
-                  <div
-                    key={f.colLetter}
-                    ref={contractorDropdownRef}
-                    style={{
-                      background: "var(--bg-card-subtle)",
-                      padding: "12px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--border-subtle)",
-                      position: "relative",
-                    }}
-                  >
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        fontWeight: 600,
-                        fontSize: "13px",
-                        marginBottom: "6px",
-                        color: "var(--text-main)",
-                      }}
-                    >
-                      <span>
-                        {f.header} ({f.colLetter})
-                      </span>
-                      <FieldIndicator status={fieldStatuses[f.colLetter]} />
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={() => setContractorDropdownOpen((prev) => !prev)}
-                      className="dcr-multi-select-btn"
-                    >
-                      <span style={{ flex: 1, paddingRight: "8px" }}>
-                        {selectedList.length === 0
-                          ? "- Select Contractor(s) -"
-                          : selectedList.join(", ")}
-                      </span>
-                      <span style={{ fontSize: "10px", opacity: 0.6, flexShrink: 0 }}>
-                        {contractorDropdownOpen ? "▲" : "▼"}
-                      </span>
-                    </button>
-
-                    {contractorDropdownOpen && (
-                      <div className="dcr-multi-select-popover">
-                        {contractorOptions.length === 0 ? (
-                          <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--text-subtle)" }}>
-                            No options in Data Val
-                          </div>
-                        ) : (
-                          contractorOptions.map((opt) => {
-                            const isSelected = selectedList.includes(opt);
-                            return (
-                              <div
-                                key={opt}
-                                onClick={() => handleContractorToggle(f.colLetter, opt)}
-                                className={`dcr-multi-select-item ${isSelected ? "selected" : ""}`}
-                              >
-                                <span>{opt}</span>
-                                {isSelected && (
-                                  <span style={{ color: "#16a34a", fontWeight: 700, marginLeft: "8px" }}>
-                                    ✓
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-
-              // Other Columns: Single Select Dropdown or Text Input
-              const rawOptions =
-                dynamicDropdowns[f.colLetter] &&
-                dynamicDropdowns[f.colLetter].length > 0
-                  ? dynamicDropdowns[f.colLetter]
-                  : propDropdownOptions &&
-                      propDropdownOptions[f.colLetter] &&
-                      propDropdownOptions[f.colLetter].length > 0
-                    ? propDropdownOptions[f.colLetter]
-                    : DROPDOWN_FIELD_OPTIONS[f.colLetter];
-
-              let dropdownOptions = null;
-              if (rawOptions && rawOptions.length > 0) {
-                dropdownOptions = [...rawOptions];
-                if (currentValue && !dropdownOptions.includes(currentValue)) {
-                  dropdownOptions.unshift(currentValue);
-                }
-              }
-
-              return (
+              {managerSignOffs.map((f) => (
                 <div
                   key={f.colLetter}
+                  id={`field-card-${f.colLetter}`}
                   style={{
                     background: "var(--bg-card-subtle)",
                     padding: "12px",
                     borderRadius: "6px",
                     border: "1px solid var(--border-subtle)",
+                    transition: "border-color 0.2s ease, box-shadow 0.2s ease",
                   }}
                 >
                   <label
@@ -1687,87 +1063,1093 @@ export default function DCRReview({
                     </span>
                     <FieldIndicator status={fieldStatuses[f.colLetter]} />
                   </label>
-
-                  {dropdownOptions ? (
-                    <select
-                      className="dcr-select"
-                      value={currentValue}
-                      onChange={(e) =>
-                        handleFieldChange(f.colLetter, e.target.value)
-                      }
-                      style={{ width: "100%" }}
-                    >
-                      <option value="">- Select -</option>
-                      {dropdownOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      className="dcr-input"
-                      value={currentValue}
-                      onChange={(e) =>
-                        handleFieldChange(f.colLetter, e.target.value)
-                      }
-                      style={{ width: "100%" }}
-                    />
-                  )}
+                  <input
+                    type="text"
+                    className="dcr-input"
+                    value={formValues[f.colLetter] ?? ""}
+                    onChange={(e) => handleFieldChange(f.colLetter, e.target.value)}
+                    style={{ width: "100%" }}
+                  />
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Section 5: Dedicated Full-Width Comments (Column AR) */}
-      {commentsField && (
-        <div
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border-color)",
-            borderRadius: "8px",
-            padding: "16px 20px",
-            marginBottom: "24px",
-            boxShadow: "var(--shadow-card)",
-          }}
-        >
+          {/* Section 2: Locked Form Specs */}
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "14px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "8px",
+              padding: "16px 20px",
+              marginBottom: "24px",
+              boxShadow: "var(--shadow-card)",
             }}
           >
-            <h3
+            <div
               style={{
-                margin: 0,
-                fontSize: "16px",
-                color: "var(--text-main)",
                 display: "flex",
+                justifyContent: "space-between",
                 alignItems: "center",
+                marginBottom: "14px",
               }}
             >
-              {commentsField.header || "Comments"} ({commentsField.colLetter})
-              <FieldIndicator status={fieldStatuses[commentsField.colLetter]} />
-            </h3>
+              <h3
+                style={{ margin: 0, fontSize: "16px", color: "var(--text-main)" }}
+              >
+                Locked DCR Form Data (Cols C through Y)
+              </h3>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: "12px",
+                alignItems: "stretch",
+              }}
+            >
+              {readOnlySpecs.map((f) => {
+                const isExpanded = !!expandedFields[f.colLetter];
+                const textValue = String(f.value || "");
+                const isLong =
+                  textValue.length > 55 || textValue.split("\n").length > 2;
+
+                return (
+                  <div
+                    key={f.colLetter}
+                    id={`field-card-${f.colLetter}`}
+                    style={{
+                      background: "var(--bg-card-subtle)",
+                      border: "1px solid var(--border-subtle)",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      height: "100%",
+                      boxSizing: "border-box",
+                      transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+                    }}
+                  >
+                    <div
+                      className="spec-header-clamped"
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--text-subtle)",
+                        textTransform: "uppercase",
+                        marginBottom: "10px",
+                      }}
+                      title={`${f.header} (${f.colLetter})`}
+                    >
+                      {f.header} ({f.colLetter})
+                    </div>
+
+                    <div style={{ marginTop: "auto" }}>
+                      {isLong && !isExpanded ? (
+                        <div
+                          style={{
+                            position: "relative",
+                            lineHeight: "1.4",
+                            maxHeight: "2.8em",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            className="spec-value-clamped"
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: 500,
+                              wordBreak: "break-word",
+                              color: f.value
+                                ? "var(--text-main)"
+                                : "var(--text-subtle)",
+                              lineHeight: "1.4",
+                              paddingRight: "62px",
+                            }}
+                          >
+                            {f.value || "—"}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => toggleFieldExpand(f.colLetter)}
+                            className="spec-expand-btn"
+                            style={{
+                              position: "absolute",
+                              right: 0,
+                              bottom: 0,
+                              background: "var(--bg-card-subtle)",
+                              paddingLeft: "6px",
+                              lineHeight: "1.4",
+                            }}
+                          >
+                            More ▼
+                          </button>
+                        </div>
+                      ) : (
+                        <div>
+                          <div
+                            style={{
+                              fontSize: "14px",
+                              fontWeight: 500,
+                              wordBreak: "break-word",
+                              color: f.value
+                                ? "var(--text-main)"
+                                : "var(--text-subtle)",
+                              lineHeight: "1.4",
+                            }}
+                          >
+                            {f.value || "—"}
+                          </div>
+                          {isLong && isExpanded && (
+                            <button
+                              type="button"
+                              onClick={() => toggleFieldExpand(f.colLetter)}
+                              className="spec-expand-btn"
+                              style={{ marginTop: "4px" }}
+                            >
+                              Less ▲
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          <textarea
-            rows={5}
-            className="dcr-textarea"
-            value={formValues[commentsField.colLetter] ?? ""}
-            onChange={(e) =>
-              handleFieldChange(commentsField.colLetter, e.target.value)
-            }
-            placeholder="Enter review remarks, coordinator notes, or reason for status update..."
-            style={{ width: "100%", resize: "vertical" }}
-          />
+          {/* Section 3: Media & Drive Folder Explorer */}
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "8px",
+              padding: "20px",
+              marginBottom: "24px",
+              boxShadow: "var(--shadow-card)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "16px",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              <div
+                style={{
+                  display: "inline-flex",
+                  background: "var(--bg-card-subtle)",
+                  padding: "3px",
+                  borderRadius: "24px",
+                  border: "1px solid var(--border-color)",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setDriveViewMode("photos")}
+                  style={{
+                    border: "none",
+                    outline: "none",
+                    cursor: "pointer",
+                    padding: "6px 18px",
+                    borderRadius: "20px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    transition: "all 0.2s ease",
+                    background:
+                      driveViewMode === "photos"
+                        ? "var(--btn-primary-bg)"
+                        : "transparent",
+                    color:
+                      driveViewMode === "photos" ? "#ffffff" : "var(--text-muted)",
+                  }}
+                >
+                  Photos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDriveViewMode("files")}
+                  style={{
+                    border: "none",
+                    outline: "none",
+                    cursor: "pointer",
+                    padding: "6px 18px",
+                    borderRadius: "20px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    transition: "all 0.2s ease",
+                    background:
+                      driveViewMode === "files"
+                        ? "var(--btn-primary-bg)"
+                        : "transparent",
+                    color:
+                      driveViewMode === "files" ? "#ffffff" : "var(--text-muted)",
+                  }}
+                >
+                  Files
+                </button>
+              </div>
+
+              {folderUrl && (
+                <a
+                  href={folderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-secondary"
+                  style={{
+                    textDecoration: "none",
+                    borderRadius: "16px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  📁 Open Folder in Google Drive ↗
+                </a>
+              )}
+            </div>
+
+            {photosLoading ? (
+              <div
+                style={{
+                  padding: "40px",
+                  textAlign: "center",
+                  color: "var(--text-muted)",
+                  background: "var(--bg-card-subtle)",
+                  borderRadius: "6px",
+                }}
+              >
+                Loading folder contents from Google Drive...
+              </div>
+            ) : driveViewMode === "photos" ? (
+              photos.length === 0 ? (
+                <div
+                  style={{
+                    padding: "30px",
+                    textAlign: "center",
+                    color: "var(--text-subtle)",
+                    background: "var(--bg-card-subtle)",
+                    borderRadius: "6px",
+                  }}
+                >
+                  {folderUrl
+                    ? "No photo files found in this folder."
+                    : "No photo folder attached to this DCR."}
+                </div>
+              ) : (
+                <div>
+                  <div
+                    style={{
+                      position: "relative",
+                      background: "#0a0a0a",
+                      borderRadius: "8px",
+                      height: "460px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <button
+                      onClick={() =>
+                        setActivePhotoIndex((prev) =>
+                          prev > 0 ? prev - 1 : photos.length - 1,
+                        )
+                      }
+                      style={{
+                        position: "absolute",
+                        left: "16px",
+                        zIndex: 2,
+                        background: "rgba(0,0,0,0.6)",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "50%",
+                        width: "40px",
+                        height: "40px",
+                        cursor: "pointer",
+                        fontSize: "18px",
+                      }}
+                    >
+                      ◀
+                    </button>
+
+                    <img
+                      src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
+                      alt={activePhoto.name}
+                      onClick={() => setLightboxOpen(true)}
+                      style={{
+                        maxHeight: "100%",
+                        maxWidth: "100%",
+                        objectFit: "contain",
+                        cursor: "zoom-in",
+                      }}
+                      title="Click to view full screen"
+                    />
+
+                    <button
+                      onClick={() =>
+                        setActivePhotoIndex((prev) =>
+                          prev < photos.length - 1 ? prev + 1 : 0,
+                        )
+                      }
+                      style={{
+                        position: "absolute",
+                        right: "16px",
+                        zIndex: 2,
+                        background: "rgba(0,0,0,0.6)",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "50%",
+                        width: "40px",
+                        height: "40px",
+                        cursor: "pointer",
+                        fontSize: "18px",
+                      }}
+                    >
+                      ▶
+                    </button>
+
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: "12px",
+                        background: "rgba(0,0,0,0.75)",
+                        color: "#ffffff",
+                        padding: "4px 14px",
+                        borderRadius: "16px",
+                        fontSize: "12px",
+                        zIndex: 2,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {activePhoto.name} ({activePhotoIndex + 1} of {photos.length})
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      overflowX: "auto",
+                      marginTop: "12px",
+                      paddingBottom: "6px",
+                    }}
+                  >
+                    {photos.map((photo, idx) => (
+                      <div
+                        key={photo.id}
+                        onClick={() => setActivePhotoIndex(idx)}
+                        style={{
+                          flexShrink: 0,
+                          width: "80px",
+                          height: "60px",
+                          borderRadius: "4px",
+                          overflow: "hidden",
+                          cursor: "pointer",
+                          border:
+                            idx === activePhotoIndex
+                              ? "2px solid var(--btn-primary-bg)"
+                              : "1px solid var(--border-color)",
+                          opacity: idx === activePhotoIndex ? 1 : 0.6,
+                        }}
+                      >
+                        <img
+                          src={`/api/drive/file/${photo.id}?token=${encodeURIComponent(accessToken)}`}
+                          alt={photo.name}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : folderFiles.length === 0 ? (
+              <div
+                style={{
+                  padding: "30px",
+                  textAlign: "center",
+                  color: "var(--text-subtle)",
+                  background: "var(--bg-card-subtle)",
+                  borderRadius: "6px",
+                }}
+              >
+                No files found in this Google Drive folder.
+              </div>
+            ) : (
+              <div
+                style={{
+                  maxHeight: "460px",
+                  overflowY: "auto",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "6px",
+                }}
+              >
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "collapse",
+                    fontSize: "13px",
+                    textAlign: "left",
+                  }}
+                >
+                  <thead
+                    style={{
+                      background: "var(--bg-card-subtle)",
+                      borderBottom: "1px solid var(--border-color)",
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                    }}
+                  >
+                    <tr>
+                      <th style={{ padding: "10px 14px", width: "80px" }}>Type</th>
+                      <th style={{ padding: "10px 14px" }}>File Name</th>
+                      <th
+                        style={{
+                          padding: "10px 14px",
+                          width: "210px",
+                          textAlign: "right",
+                        }}
+                      >
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {folderFiles.map((file) => {
+                      const badge = getFileBadge(file.mimeType, file.name);
+                      const isDark =
+                        document.documentElement.getAttribute("data-theme") ===
+                        "dark";
+                      const isImg = file.mimeType?.startsWith("image/");
+
+                      return (
+                        <tr
+                          key={file.id}
+                          className="dcr-table-row"
+                          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                        >
+                          <td style={{ padding: "10px 14px" }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                fontSize: "11px",
+                                fontWeight: 700,
+                                background: isDark ? badge.darkBg : badge.bg,
+                                color: isDark ? badge.darkText : badge.text,
+                              }}
+                            >
+                              {badge.label}
+                            </span>
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px 14px",
+                              fontWeight: 500,
+                              color: "var(--text-main)",
+                              wordBreak: "break-all",
+                            }}
+                          >
+                            {file.name}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px 14px",
+                              textAlign: "right",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "flex-end",
+                                gap: "8px",
+                              }}
+                            >
+                              {isImg && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const photoIdx = photos.findIndex(
+                                      (p) => p.id === file.id,
+                                    );
+                                    if (photoIdx !== -1)
+                                      setActivePhotoIndex(photoIdx);
+                                    setDriveViewMode("photos");
+                                  }}
+                                  className="btn-secondary"
+                                  style={{
+                                    padding: "4px 10px",
+                                    fontSize: "12px",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  View Photo
+                                </button>
+                              )}
+                              <a
+                                href={
+                                  file.webViewLink ||
+                                  `https://drive.google.com/file/d/${file.id}/view`
+                                }
+                                target="_blank"
+                                rel="noreferrer"
+                                className="btn-secondary"
+                                style={{
+                                  padding: "4px 10px",
+                                  fontSize: "12px",
+                                  textDecoration: "none",
+                                  whiteSpace: "nowrap",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                }}
+                              >
+                                Open ↗
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Post-Spec Processing Fields */}
+          {postSpecsFields.length > 0 && (
+            <div
+              style={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
+                borderRadius: "8px",
+                padding: "16px 20px",
+                marginBottom: "24px",
+                boxShadow: "var(--shadow-card)",
+              }}
+            >
+              <h3
+                style={{
+                  margin: "0 0 12px 0",
+                  fontSize: "16px",
+                  color: "var(--text-main)",
+                }}
+              >
+                Downstream Processing & Workday Tracking (Col Z+)
+              </h3>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "16px",
+                }}
+              >
+                {postSpecsFields.map((f) => {
+                  const currentValue = formValues[f.colLetter] ?? "";
+
+                  if (f.colLetter === "AI") {
+                    const contractorOptions =
+                      (dynamicDropdowns?.AI && dynamicDropdowns.AI.length > 0
+                        ? dynamicDropdowns.AI
+                        : propDropdownOptions?.AI) || [];
+
+                    const selectedList = currentValue
+                      ? currentValue.split(",").map((s) => s.trim()).filter(Boolean)
+                      : [];
+
+                    return (
+                      <div
+                        key={f.colLetter}
+                        id={`field-card-${f.colLetter}`}
+                        ref={contractorDropdownRef}
+                        style={{
+                          background: "var(--bg-card-subtle)",
+                          padding: "12px",
+                          borderRadius: "6px",
+                          border: "1px solid var(--border-subtle)",
+                          position: "relative",
+                          transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+                        }}
+                      >
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            fontWeight: 600,
+                            fontSize: "13px",
+                            marginBottom: "6px",
+                            color: "var(--text-main)",
+                          }}
+                        >
+                          <span>
+                            {f.header} ({f.colLetter})
+                          </span>
+                          <FieldIndicator status={fieldStatuses[f.colLetter]} />
+                        </label>
+
+                        <div style={{ position: "relative" }}>
+                          <button
+                            type="button"
+                            onClick={() => setContractorDropdownOpen((prev) => !prev)}
+                            className="dcr-multi-select-btn"
+                          >
+                            <span
+                              style={{
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                marginRight: "8px",
+                              }}
+                            >
+                              {selectedList.length === 0
+                                ? "- Select Contractor(s) -"
+                                : selectedList.join(", ")}
+                            </span>
+                            <span style={{ fontSize: "10px", opacity: 0.6, flexShrink: 0 }}>
+                              {contractorDropdownOpen ? "▲" : "▼"}
+                            </span>
+                          </button>
+
+                          {contractorDropdownOpen && (
+                            <div className="dcr-multi-select-popover">
+                              {contractorOptions.length === 0 ? (
+                                <div style={{ padding: "10px 14px", fontSize: "12px", color: "var(--text-subtle)" }}>
+                                  No options in Data Val
+                                </div>
+                              ) : (
+                                contractorOptions.map((opt) => {
+                                  const isSelected = selectedList.includes(opt);
+                                  return (
+                                    <div
+                                      key={opt}
+                                      onClick={() => handleContractorToggle(f.colLetter, opt)}
+                                      className={`dcr-multi-select-item ${isSelected ? "selected" : ""}`}
+                                    >
+                                      <span>{opt}</span>
+                                      {isSelected && (
+                                        <span style={{ color: "#16a34a", fontWeight: 700, marginLeft: "8px" }}>
+                                          ✓
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const rawOptions =
+                    dynamicDropdowns[f.colLetter] &&
+                    dynamicDropdowns[f.colLetter].length > 0
+                      ? dynamicDropdowns[f.colLetter]
+                      : propDropdownOptions &&
+                          propDropdownOptions[f.colLetter] &&
+                          propDropdownOptions[f.colLetter].length > 0
+                        ? propDropdownOptions[f.colLetter]
+                        : DROPDOWN_FIELD_OPTIONS[f.colLetter];
+
+                  let dropdownOptions = null;
+                  if (rawOptions && rawOptions.length > 0) {
+                    dropdownOptions = [...rawOptions];
+                    if (currentValue && !dropdownOptions.includes(currentValue)) {
+                      dropdownOptions.unshift(currentValue);
+                    }
+                  }
+
+                  return (
+                    <div
+                      key={f.colLetter}
+                      id={`field-card-${f.colLetter}`}
+                      style={{
+                        background: "var(--bg-card-subtle)",
+                        padding: "12px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-subtle)",
+                        transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontWeight: 600,
+                          fontSize: "13px",
+                          marginBottom: "6px",
+                          color: "var(--text-main)",
+                        }}
+                      >
+                        <span>
+                          {f.header} ({f.colLetter})
+                        </span>
+                        <FieldIndicator status={fieldStatuses[f.colLetter]} />
+                      </label>
+
+                      {dropdownOptions ? (
+                        <select
+                          className="dcr-select"
+                          value={currentValue}
+                          onChange={(e) =>
+                            handleFieldChange(f.colLetter, e.target.value)
+                          }
+                          style={{ width: "100%" }}
+                        >
+                          <option value="">- Select -</option>
+                          {dropdownOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          className="dcr-input"
+                          value={currentValue}
+                          onChange={(e) =>
+                            handleFieldChange(f.colLetter, e.target.value)
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Section 5: Dedicated Full-Width Comments (Column AR) */}
+          {commentsField && (
+            <div
+              id={`field-card-${commentsField.colLetter}`}
+              style={{
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-color)",
+                borderRadius: "8px",
+                padding: "16px 20px",
+                marginBottom: "24px",
+                boxShadow: "var(--shadow-card)",
+                transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "14px",
+                }}
+              >
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: "16px",
+                    color: "var(--text-main)",
+                    display: "flex",
+                    alignItems: "center",
+                  }}
+                >
+                  {commentsField.header || "Comments"} ({commentsField.colLetter})
+                  <FieldIndicator status={fieldStatuses[commentsField.colLetter]} />
+                </h3>
+              </div>
+
+              <textarea
+                rows={5}
+                className="dcr-textarea"
+                value={formValues[commentsField.colLetter] ?? ""}
+                onChange={(e) =>
+                  handleFieldChange(commentsField.colLetter, e.target.value)
+                }
+                placeholder="Enter review remarks, coordinator notes, or reason for status update..."
+                style={{ width: "100%", resize: "vertical" }}
+              />
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Right Pane: 30% Sticky Comments & Activity Feed */}
+        {commentsDrawerOpen && (
+          <div
+            style={{
+              flex: "0 0 calc(30% - 24px)",
+              maxWidth: "calc(30% - 24px)",
+              minWidth: "280px",
+              position: "sticky",
+              top: "20px",
+              maxHeight: "calc(100vh - 40px)",
+              overflowY: "auto",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "8px",
+              boxShadow: "var(--shadow-card)",
+              padding: "16px",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "12px",
+                borderBottom: "1px solid var(--border-subtle)",
+                paddingBottom: "10px",
+              }}
+            >
+              <div>
+                <h3
+                  style={{
+                    margin: 0,
+                    fontSize: "15px",
+                    color: "var(--text-main)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <span>💬 Comments</span>
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      padding: "2px 7px",
+                      borderRadius: "10px",
+                      background: "var(--bg-card-subtle)",
+                      color: "var(--text-muted)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {comments.length}
+                  </span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCommentsDrawerOpen(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: "16px",
+                  cursor: "pointer",
+                  color: "var(--text-muted)",
+                }}
+                title="Close comments pane"
+              >
+                ✕
+              </button>
+            </div>
+
+            {comments.length === 0 ? (
+              <div
+                style={{
+                  padding: "24px 8px",
+                  textAlign: "center",
+                  color: "var(--text-subtle)",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                }}
+              >
+                No active comments or cell notes found on this DCR row in Google Sheets.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {comments.map((c) => {
+                  const fieldData = dcrData?.fields?.find((f) => f.colLetter === c.colLetter);
+                  const colHeaderName = fieldData ? fieldData.header : `Column ${c.colLetter}`;
+
+                  return (
+                    <div
+                      key={c.commentId}
+                      style={{
+                        background: "var(--bg-card-subtle)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "6px",
+                        padding: "12px",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        <span
+                          title={colHeaderName}
+                          style={{
+                            fontWeight: 700,
+                            color: "var(--btn-primary-bg)",
+                            fontSize: "12px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            flex: 1,
+                            marginRight: "8px",
+                          }}
+                        >
+                          {colHeaderName}
+                        </span>
+                        {c.resolved ? (
+                          <span style={{ fontSize: "11px", color: "#16a34a", fontWeight: 600, flexShrink: 0 }}>
+                            ✓ Resolved
+                          </span>
+                        ) : c.isNote ? (
+                          <span style={{ fontSize: "11px", color: "var(--text-subtle)", fontWeight: 500, flexShrink: 0 }}>
+                            Note
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {c.plainTextQuote && (
+                        <div
+                          style={{
+                            fontSize: "11px",
+                            fontStyle: "italic",
+                            color: "var(--text-subtle)",
+                            marginBottom: "4px",
+                            borderLeft: "2px solid var(--border-color)",
+                            paddingLeft: "6px",
+                          }}
+                        >
+                          "{decodeHtmlEntities(c.plainTextQuote)}"
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          color: "var(--text-main)",
+                          lineHeight: "1.4",
+                          wordBreak: "break-word",
+                          marginBottom: "6px",
+                        }}
+                      >
+                        "{decodeHtmlEntities(c.text)}"
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          fontSize: "11px",
+                          color: "var(--text-subtle)",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        <span>— {c.authorName || c.authorEmail}</span>
+                        {c.timestamp && (
+                          <span>
+                            {new Date(c.timestamp).toLocaleDateString([], {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </span>
+                        )}
+                      </div>
+
+                      {c.replies && c.replies.length > 0 && (
+                        <div
+                          style={{
+                            borderLeft: "2px solid var(--border-color)",
+                            paddingLeft: "8px",
+                            margin: "6px 0 10px 0",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px",
+                          }}
+                        >
+                          {c.replies.map((rep) => (
+                            <div key={rep.replyId} style={{ fontSize: "12px" }}>
+                              <div style={{ color: "var(--text-main)" }}>
+                                {decodeHtmlEntities(rep.text)}
+                              </div>
+                              <div style={{ fontSize: "10px", color: "var(--text-subtle)" }}>
+                                {rep.authorName}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          borderTop: "1px solid var(--border-subtle)",
+                          paddingTop: "8px",
+                          marginTop: "4px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            fontWeight: 600,
+                            letterSpacing: "0.3px",
+                          }}
+                        >
+                          {c.cellCoordinate}
+                        </span>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleHighlightField(c.colLetter)}
+                            className="btn-secondary"
+                            style={{
+                              padding: "3px 8px",
+                              fontSize: "11px",
+                              borderRadius: "4px",
+                            }}
+                          >
+                            Highlight Field
+                          </button>
+                          <a
+                            href={c.openInSheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-secondary"
+                            style={{
+                              padding: "3px 8px",
+                              fontSize: "11px",
+                              borderRadius: "4px",
+                              textDecoration: "none",
+                              color: "var(--btn-primary-bg)",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Open in Sheet ↗
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Fullscreen Lightbox Modal */}
       {lightboxOpen && activePhoto && (

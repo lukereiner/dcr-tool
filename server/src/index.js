@@ -14,20 +14,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// 5-minute TTL for cached sheet data
 const cache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
-
-// In-flight request deduplication map
 const pendingRequests = new Map();
 
 app.use(cors());
 app.use(express.json());
 
-// Master Configuration Sheet containing RegionConfig and UserConfig tabs
 const MASTER_SPREADSHEET_ID = '1TrsDRv-aoCxPLzCp0ma6JlwamJPT13JuKuIda-5Uvdg';
 const DATA_VAL_TAB = 'Data Val (Cable Replacement)';
+const MAIN_TAB = 'Cable Replacement';
 
-// Exponential backoff & jitter configuration for Google APIs
 const googleRetryConfig = {
   retry: 4,
   retryDelay: (err) => {
@@ -44,7 +40,7 @@ const googleRetryConfig = {
     const status = err.response?.status || err.code;
     const attempt = err.config?.currentRetryAttempt || 1;
     console.warn(
-      `[GOOGLE API RETRY] HTTP ${status} encountered on ${err.config?.url}. Backing off and retrying attempt #${attempt}...`
+      `[GOOGLE API RETRY] HTTP ${status} on ${err.config?.url}. Retrying attempt #${attempt}...`
     );
   },
 };
@@ -79,7 +75,6 @@ const getDriveClient = (authHeader) => {
   });
 };
 
-// Retrieve and cache user email from OAuth access token
 async function getUserEmailFromAuth(authHeader) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Missing or malformed Authorization header');
@@ -104,7 +99,6 @@ async function getUserEmailFromAuth(authHeader) {
   return email;
 }
 
-// Fetch and cache Master Configuration (RegionConfig & UserConfig)
 async function getMasterConfig(sheets, forceRefresh = false) {
   const cacheKey = 'master_config_bundle';
 
@@ -126,7 +120,6 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   const regionRows = valueRanges[0]?.values || [];
   const userRows = valueRanges[1]?.values || [];
 
-  // Dynamic Header Mapping for RegionConfig
   const regHeaders = (regionRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
   let idCol = regHeaders.findIndex(
     (h) => h === 'region id' || (h.includes('id') && !h.includes('sheet') && !h.includes('folder'))
@@ -154,7 +147,6 @@ async function getMasterConfig(sheets, forceRefresh = false) {
     }
   }
 
-  // Dynamic Header Mapping for UserConfig
   const userHeaders = (userRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
   let emailCol = userHeaders.findIndex((h) => h.includes('email'));
   let roleCol = userHeaders.findIndex((h) => h.includes('role') || h.includes('title'));
@@ -182,23 +174,18 @@ async function getMasterConfig(sheets, forceRefresh = false) {
     }
   }
 
-  console.log(
-    `[MASTER CONFIG] Successfully loaded ${regions.length} active regions and ${users.length} authorized users.`
-  );
-
   const bundle = { regions, users };
   cache.set(cacheKey, bundle, 300);
   return bundle;
 }
 
-// Authorize user email and resolve target region spreadsheet
 async function resolveRegionSpreadsheet(req, sheets) {
   const userEmail = await getUserEmailFromAuth(req.headers.authorization);
   const { regions, users } = await getMasterConfig(sheets, false);
 
   const userProfile = users.find((u) => u.email === userEmail);
   if (!userProfile) {
-    const error = new Error(`Account "${userEmail}" is not authorized in UserConfig. Please contact an administrator.`);
+    const error = new Error(`Account "${userEmail}" is not authorized in UserConfig.`);
     error.statusCode = 403;
     throw error;
   }
@@ -245,6 +232,7 @@ async function resolveRegionSpreadsheet(req, sheets) {
     targetRegion,
     spreadsheetId: targetRegion.spreadsheetId,
     userProfile,
+    userEmail,
   };
 }
 
@@ -258,7 +246,6 @@ function getColLetter(index) {
   return letter;
 }
 
-// Convert validation sheet rows into options dictionary and extract form links
 function parseValidationRows(valRows) {
   const optionsMap = {
     Z: [],
@@ -280,12 +267,11 @@ function parseValidationRows(valRows) {
   const headers = valRows[0] || [];
   const colLetterMapping = {};
 
-  // Extract Form Links from Column F and Column G (by header name or exact column index)
   let evalColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('eval'));
-  if (evalColIndex === -1) evalColIndex = 5; // Column F default
+  if (evalColIndex === -1) evalColIndex = 5;
 
   let qcColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('qc'));
-  if (qcColIndex === -1) qcColIndex = 6; // Column G default
+  if (qcColIndex === -1) qcColIndex = 6;
 
   if (valRows.length > 1) {
     const row2 = valRows[1] || [];
@@ -293,7 +279,6 @@ function parseValidationRows(valRows) {
     formLinks.qcFormUrl = String(row2[qcColIndex] || '').trim();
   }
 
-  // Parse dropdown options from labeled columns
   headers.forEach((header, colIdx) => {
     const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
     if (matches.length > 0) {
@@ -318,13 +303,11 @@ function parseValidationRows(valRows) {
   return { dropdownOptions: optionsMap, formLinks };
 }
 
-// Fetch region sheet with Data Val tab
 async function getOrFetchSheetWithValidation(sheets, spreadsheetId, regionId, tabName, forceRefresh = false) {
   const cacheKey = `sheet_bundle_${regionId}_${tabName}`;
 
   if (forceRefresh) {
     cache.del(cacheKey);
-    console.log(`[FORCE REFRESH] Invalidation requested for ${regionId} - ${tabName}`);
   }
 
   if (cache.has(cacheKey)) {
@@ -335,7 +318,6 @@ async function getOrFetchSheetWithValidation(sheets, spreadsheetId, regionId, ta
     return pendingRequests.get(cacheKey);
   }
 
-  console.log(`[CACHE MISS] Fetching ${regionId} sheet (${tabName} & ${DATA_VAL_TAB})...`);
   const fetchPromise = (async () => {
     try {
       const response = await sheets.spreadsheets.values.batchGet({
@@ -359,6 +341,88 @@ async function getOrFetchSheetWithValidation(sheets, spreadsheetId, regionId, ta
 
   pendingRequests.set(cacheKey, fetchPromise);
   return fetchPromise;
+}
+
+// Fetch native cell comments from Google Sheets for the active DCR row and construct deep links
+async function getNativeCellComments(token, spreadsheetId, sheetTitle, targetRowIndex, sheetRowNumber) {
+  const comments = [];
+  let targetSheetId = 0;
+
+  try {
+    const sheetsUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?commentsViewMode=COMMENTS_VIEW_MODE_INCLUDED&fields=sheets(properties(sheetId,title),commentAnchors),comments`;
+    const sheetsRes = await fetch(sheetsUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!sheetsRes.ok) {
+      console.warn('[COMMENTS] Sheets API returned error:', sheetsRes.status, sheetsRes.statusText);
+      return { comments: [], sheetId: 0 };
+    }
+
+    const sData = await sheetsRes.json();
+    const targetSheet = (sData.sheets || []).find(
+      (s) => s.properties?.title === sheetTitle
+    );
+
+    targetSheetId = targetSheet?.properties?.sheetId ?? 0;
+    const anchors = targetSheet?.commentAnchors || [];
+    const allThreads = sData.comments || [];
+
+    // Correct schema: anchor.range contains startRowIndex/startColumnIndex
+    const rowAnchors = anchors.filter((a) => {
+      const r = a.range || a.gridRange;
+      return r && r.startRowIndex !== undefined && Number(r.startRowIndex) === Number(targetRowIndex);
+    });
+
+    rowAnchors.forEach((anchor) => {
+      const r = anchor.range || anchor.gridRange;
+      const colIdx = r && r.startColumnIndex !== undefined ? Number(r.startColumnIndex) : 0;
+      const colLetter = getColLetter(colIdx);
+      const cellCoordinate = `${colLetter}${sheetRowNumber}`;
+      const openInSheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${targetSheetId}&range=${cellCoordinate}`;
+
+      const thread = allThreads.find(
+        (t) =>
+          (t.anchorId && anchor.anchorId && String(t.anchorId) === String(anchor.anchorId)) ||
+          (t.commentId && anchor.commentId && String(t.commentId) === String(anchor.commentId))
+      );
+
+      if (thread) {
+        const headPost = thread.headPost || (thread.posts && thread.posts[0]) || {};
+        const replies = thread.replies || (thread.posts && thread.posts.slice(1)) || [];
+
+        comments.push({
+          commentId: thread.commentId,
+          colLetter,
+          cellCoordinate,
+          plainTextQuote: thread.plainTextQuote || '',
+          text: headPost.content || '',
+          authorName:
+            headPost.author?.displayName ||
+            (headPost.author?.emailAddress || '').split('@')[0] ||
+            'User',
+          authorEmail: headPost.author?.emailAddress || '',
+          timestamp: headPost.createTime || '',
+          resolved: thread.status === 'RESOLVED',
+          openInSheetUrl,
+          replies: replies.map((rep, rIdx) => ({
+            replyId: rep.postId || rep.id || `rep_${rIdx}`,
+            text: rep.content || '',
+            authorName:
+              rep.author?.displayName ||
+              (rep.author?.emailAddress || '').split('@')[0] ||
+              'User',
+            timestamp: rep.createTime || '',
+          })),
+        });
+      }
+    });
+
+    return { comments, sheetId: targetSheetId };
+  } catch (err) {
+    console.warn('[COMMENTS] Error querying native cell comments:', err.message);
+    return { comments: [], sheetId: targetSheetId };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -419,7 +483,7 @@ app.get('/api/auth/me', async (req, res) => {
 
 app.get('/api/sheet', async (req, res) => {
   try {
-    const tabName = req.query.tab || 'Cable Replacement';
+    const tabName = req.query.tab || MAIN_TAB;
     const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
 
@@ -446,7 +510,7 @@ app.get('/api/sheet', async (req, res) => {
 app.post('/api/sheet/cell', async (req, res) => {
   try {
     const sheets = getSheetsClient(req.headers.authorization);
-    const { tabName = 'Cable Replacement', cell, value } = req.body;
+    const { tabName = MAIN_TAB, cell, value } = req.body;
 
     if (!cell) {
       return res.status(400).json({ error: 'Missing cell coordinate (e.g. B2)' });
@@ -473,7 +537,7 @@ app.post('/api/sheet/cell', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dedicated DCR Endpoints
+// Dedicated DCR & Native Cell Comments Endpoints
 // ---------------------------------------------------------------------------
 
 app.get('/api/dcr/:dcrId', async (req, res) => {
@@ -481,6 +545,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     const { dcrId } = req.params;
     const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
@@ -488,7 +553,7 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
       sheets,
       spreadsheetId,
       targetRegion.id,
-      'Cable Replacement',
+      MAIN_TAB,
       forceRefresh
     );
 
@@ -513,7 +578,16 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     }
 
     const targetRow = rows[foundIndex];
-    const sheetRowNumber = foundIndex + 1;
+    const sheetRowNumber = foundIndex + 1; // 1-indexed
+
+    // Fetch native comments with deep links
+    const { comments, sheetId: targetSheetId } = await getNativeCellComments(
+      token,
+      spreadsheetId,
+      MAIN_TAB,
+      foundIndex, // 0-indexed row
+      sheetRowNumber
+    );
 
     const fields = headers.map((header, idx) => ({
       colIndex: idx,
@@ -526,10 +600,12 @@ app.get('/api/dcr/:dcrId', async (req, res) => {
     res.json({
       dcrId,
       sheetRowNumber,
+      sheetId: targetSheetId,
       fields,
       dropdownOptions,
       formLinks,
       region: targetRegion,
+      comments,
     });
   } catch (error) {
     console.error('Error fetching DCR details:', error?.response?.data || error.message);
@@ -566,7 +642,7 @@ app.post('/api/dcr/:dcrId/batch', async (req, res) => {
       sheets,
       spreadsheetId,
       targetRegion.id,
-      'Cable Replacement',
+      MAIN_TAB,
       false
     );
     const DCR_COL_INDEX = 24;
@@ -587,7 +663,7 @@ app.post('/api/dcr/:dcrId/batch', async (req, res) => {
     const sheetRowNumber = foundIndex + 1;
 
     const data = Object.entries(updates).map(([colLetter, value]) => ({
-      range: `'Cable Replacement'!${colLetter.trim().toUpperCase()}${sheetRowNumber}`,
+      range: `'${MAIN_TAB}'!${colLetter.trim().toUpperCase()}${sheetRowNumber}`,
       values: [[value ?? '']],
     }));
 
@@ -599,8 +675,7 @@ app.post('/api/dcr/:dcrId/batch', async (req, res) => {
       },
     });
 
-    cache.del(`sheet_bundle_${targetRegion.id}_Cable Replacement`);
-    console.log(`[CACHE INVALIDATED] Cleared cache for ${targetRegion.name} after batch update for ${dcrId}`);
+    cache.del(`sheet_bundle_${targetRegion.id}_${MAIN_TAB}`);
 
     res.json({
       success: true,
