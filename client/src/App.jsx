@@ -12,7 +12,7 @@ import Data from "./pages/Data";
 import DCRReview from "./pages/DCRReview";
 import RefreshButton from "./components/RefreshButton";
 import { ToastProvider, useToast } from "./context/ToastContext";
-import { FaGoogle } from 'react-icons/fa'
+import { FaGoogle } from "react-icons/fa";
 
 export const AuthContext = createContext(null);
 
@@ -45,8 +45,9 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
   const [loginError, setLoginError] = useState("");
 
   const login = useGoogleLogin({
+    // UPDATE: Changed drive.readonly to drive.file
     scope:
-      "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly",
+      "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
     prompt: "select_account",
     onSuccess: (tokenResponse) => {
       setLoginError("");
@@ -100,7 +101,8 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             lineHeight: 1.5,
           }}
         >
-          Sign in with your authorized Google account to review and manage operations.
+          Sign in with your authorized Google account to review and manage
+          operations.
         </p>
 
         {sessionExpired && !loginError && (
@@ -177,7 +179,7 @@ function NavigationBar({
     { label: "Dashboard", path: "/" },
     { label: "Coordinator", path: "/coordinator" },
     { label: "Sheet Data", path: "/data" },
-   // { label: "Pole Transfers", path: "/pole-transfers" },
+    // { label: "Pole Transfers", path: "/pole-transfers" },
   ];
 
   const headerTitle = activeRegion
@@ -255,8 +257,12 @@ function NavigationBar({
                     textDecoration: "none",
                     fontSize: "14px",
                     fontWeight: active ? 600 : 500,
-                    color: active ? "var(--btn-primary-bg)" : "var(--text-muted)",
-                    background: active ? "var(--bg-card-subtle)" : "transparent",
+                    color: active
+                      ? "var(--btn-primary-bg)"
+                      : "var(--text-muted)",
+                    background: active
+                      ? "var(--bg-card-subtle)"
+                      : "transparent",
                   }}
                 >
                   {item.label}
@@ -321,7 +327,9 @@ function AppContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  const [dropdownOptions, setDropdownOptions] = useState(DEFAULT_DROPDOWN_OPTIONS);
+  const [dropdownOptions, setDropdownOptions] = useState(
+    DEFAULT_DROPDOWN_OPTIONS,
+  );
 
   const logout = (dueToExpiry = false) => {
     sessionStorage.removeItem("dcr_access_token");
@@ -360,9 +368,12 @@ function AppContent() {
 
       // Check saved region in localStorage; fallback to the first region in the list
       const savedRegionId = localStorage.getItem("dcr_active_region_id");
-      const matchedSaved = (data.allowedRegions || []).find((r) => r.id === savedRegionId);
+      const matchedSaved = (data.allowedRegions || []).find(
+        (r) => r.id === savedRegionId,
+      );
 
-      const initialRegion = matchedSaved || (data.allowedRegions && data.allowedRegions[0]) || null;
+      const initialRegion =
+        matchedSaved || (data.allowedRegions && data.allowedRegions[0]) || null;
       if (initialRegion) {
         setActiveRegion(initialRegion);
         localStorage.setItem("dcr_active_region_id", initialRegion.id);
@@ -508,7 +519,9 @@ function AppContent() {
                     >
                       <h3>Dashboard</h3>
                       <p style={{ color: "#666" }}>
-                        Active Region: <strong>{activeRegion?.name || "None"}</strong>. Business logic overview coming soon.
+                        Active Region:{" "}
+                        <strong>{activeRegion?.name || "None"}</strong>.
+                        Business logic overview coming soon.
                       </p>
                     </div>
                   }
