@@ -309,7 +309,7 @@ function InlineCommentComposer({
   buttonText = "Save",
   onSave,
   onCancel,
-  autoFocus = true
+  autoFocus = true,
 }) {
   const [text, setText] = useState(initialValue);
   const [submitting, setSubmitting] = useState(false);
@@ -324,7 +324,15 @@ function InlineCommentComposer({
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+    <form
+      onSubmit={handleSubmit}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        marginTop: "8px",
+      }}
+    >
       <textarea
         autoFocus={autoFocus}
         value={text}
@@ -341,7 +349,7 @@ function InlineCommentComposer({
           color: "var(--text-main)",
           outline: "none",
           resize: "vertical",
-          boxSizing: "border-box"
+          boxSizing: "border-box",
         }}
       />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
@@ -356,7 +364,7 @@ function InlineCommentComposer({
               fontSize: "12px",
               color: "var(--text-muted)",
               cursor: "pointer",
-              padding: "4px 8px"
+              padding: "4px 8px",
             }}
           >
             Cancel
@@ -379,6 +387,242 @@ function InlineCommentComposer({
   );
 }
 
+// Cell Comment Marker (Amber Triangle + Hover/Pin Popover)
+function CellCommentMarker({
+  colLetter,
+  colHeaderName,
+  comment,
+  commentsDrawerOpen,
+  isPinned,
+  isPreview,
+  onTriangleClick,
+  onMouseEnter,
+  onMouseLeave,
+  onClose,
+  onReply,
+  onResolve,
+}) {
+  const [isReplying, setIsReplying] = useState(false);
+  const popoverRef = useRef(null);
+
+  const isVisible = (isPreview || isPinned) && !commentsDrawerOpen;
+
+  return (
+    <div
+      style={{ position: "absolute", top: 0, right: 0, zIndex: 12 }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* Orange/Amber Corner Triangle */}
+      <div
+        className="cell-comment-triangle"
+        onClick={onTriangleClick}
+        title={
+          commentsDrawerOpen
+            ? "Click to focus in sidebar"
+            : isPinned
+            ? "Click to unpin"
+            : "Click to pin comment card"
+        }
+      />
+
+      {/* Floating Comment Card */}
+      {isVisible && comment && (
+        <div
+          ref={popoverRef}
+          className="cell-comment-popover"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "8px",
+              paddingBottom: "6px",
+              borderBottom: "1px solid var(--border-subtle)",
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 700,
+                color: "var(--btn-primary-bg)",
+                fontSize: "12px",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "200px",
+              }}
+              title={colHeaderName}
+            >
+              {colHeaderName}
+            </span>
+
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <button
+                type="button"
+                onClick={() => onResolve(comment.commentId, comment.resolved)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: "2px 6px",
+                  fontSize: "11px",
+                  color: "#16a34a",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Resolve
+              </button>
+              {isPinned && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    fontSize: "14px",
+                    cursor: "pointer",
+                    color: "var(--text-muted)",
+                    padding: "0 2px",
+                  }}
+                  title="Close card"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {comment.plainTextQuote && (
+            <div
+              style={{
+                fontSize: "11px",
+                fontStyle: "italic",
+                color: "var(--text-subtle)",
+                marginBottom: "6px",
+                borderLeft: "2px solid var(--border-color)",
+                paddingLeft: "6px",
+              }}
+            >
+              "{decodeHtmlEntities(comment.plainTextQuote)}"
+            </div>
+          )}
+
+          <div
+            style={{
+              color: "var(--text-main)",
+              fontSize: "13px",
+              lineHeight: "1.4",
+              marginBottom: "6px",
+              wordBreak: "break-word",
+            }}
+          >
+            {decodeHtmlEntities(comment.text)}
+          </div>
+
+          <div
+            style={{
+              fontSize: "11px",
+              color: "var(--text-subtle)",
+              marginBottom: "8px",
+            }}
+          >
+            — {comment.authorName || comment.authorEmail}
+            {comment.timestamp &&
+              ` • ${new Date(comment.timestamp).toLocaleDateString([], {
+                month: "short",
+                day: "numeric",
+              })}`}
+          </div>
+
+          {comment.replies && comment.replies.length > 0 && (
+            <div
+              style={{
+                borderLeft: "2px solid var(--border-color)",
+                paddingLeft: "8px",
+                margin: "6px 0 8px 0",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                maxHeight: "140px",
+                overflowY: "auto",
+              }}
+            >
+              {comment.replies.map((rep) => (
+                <div key={rep.replyId} style={{ fontSize: "12px" }}>
+                  <strong
+                    style={{
+                      color: "var(--btn-primary-bg)",
+                      marginRight: "6px",
+                    }}
+                  >
+                    {rep.authorName}:
+                  </strong>
+                  <span style={{ color: "var(--text-main)" }}>
+                    {decodeHtmlEntities(rep.text)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!isReplying ? (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "6px",
+                paddingTop: "6px",
+                borderTop: "1px solid var(--border-subtle)",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setIsReplying(true)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  fontSize: "11px",
+                  color: "var(--text-subtle)",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                Reply...
+              </button>
+              <a
+                href={comment.openInSheetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontSize: "11px",
+                  color: "var(--btn-primary-bg)",
+                  textDecoration: "none",
+                  fontWeight: 600,
+                }}
+              >
+                Open in Sheet ↗
+              </a>
+            </div>
+          ) : (
+            <InlineCommentComposer
+              placeholder="Reply..."
+              buttonText="Reply"
+              onSave={async (text) => {
+                await onReply(comment.commentId, text);
+                setIsReplying(false);
+              }}
+              onCancel={() => setIsReplying(false)}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DCRReview({
   onRecordUpdated,
@@ -386,7 +630,8 @@ export default function DCRReview({
 }) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
-  const { accessToken, logout, refreshSignal, activeRegion, userProfile } = useContext(AuthContext);
+  const { accessToken, logout, refreshSignal, activeRegion, userProfile } =
+    useContext(AuthContext);
   const { showToast } = useToast();
 
   const [dcrData, setDcrData] = useState(null);
@@ -396,13 +641,18 @@ export default function DCRReview({
     propDropdownOptions || {},
   );
   const [formLinks, setFormLinks] = useState({ evalFormUrl: "", qcFormUrl: "" });
-  
+
   const [comments, setComments] = useState([]);
   const [commentsDrawerOpen, setCommentsDrawerOpen] = useState(false);
   const [showResolvedComments, setShowResolvedComments] = useState(false);
-  
+
+  // Floating Popover States (Hover Preview & Pinning)
+  const [hoveredCommentCol, setHoveredCommentCol] = useState(null);
+  const [pinnedCommentCol, setPinnedCommentCol] = useState(null);
+  const hoverTimeoutRef = useRef(null);
+
   // States for Sidebar Inline Composers
-  const [draftTarget, setDraftTarget] = useState(null); // { colLetter, colHeaderName }
+  const [draftTarget, setDraftTarget] = useState(null);
   const [activeReplyBoxId, setActiveReplyBoxId] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editingReplyId, setEditingReplyId] = useState(null);
@@ -441,8 +691,12 @@ export default function DCRReview({
     localStorage.setItem("dcr_drive_view_mode", driveViewMode);
   }, [driveViewMode]);
 
+  // Click outside to close pinned popover
   useEffect(() => {
-    const handleClickOutside = (e) => {
+    const handleGlobalClick = (e) => {
+      if (pinnedCommentCol && !e.target.closest(".cell-comment-popover") && !e.target.closest(".cell-comment-triangle")) {
+        setPinnedCommentCol(null);
+      }
       if (
         contractorDropdownRef.current &&
         !contractorDropdownRef.current.contains(e.target)
@@ -450,9 +704,9 @@ export default function DCRReview({
         setContractorDropdownOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    document.addEventListener("mousedown", handleGlobalClick);
+    return () => document.removeEventListener("mousedown", handleGlobalClick);
+  }, [pinnedCommentCol]);
 
   const toggleFieldExpand = (colLetter) => {
     setExpandedFields((prev) => ({
@@ -602,6 +856,7 @@ export default function DCRReview({
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       Object.values(fadeTimersRef.current).forEach((t) => clearTimeout(t));
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     };
   }, []);
 
@@ -664,17 +919,48 @@ export default function DCRReview({
       showToast(`Field Column ${colLetter} is not visible in current review layout`, "info");
     }
   };
-  
-  // Left-pane hover trigger action
+
+  // Left-pane hover trigger action for empty cells
   const handleInitiateNewComment = (colLetter, colHeaderName) => {
     setCommentsDrawerOpen(true);
     setDraftTarget({ colLetter, colHeaderName });
-    // Scroll sidebar to top so they see the composer
     const sidebar = document.getElementById("comments-sidebar");
     if (sidebar) sidebar.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // --- Comment API Actions ---
+  // Triangle Click & Hover Handlers
+  const handleTriangleClick = (e, colLetter, activeComment) => {
+    e.stopPropagation();
+    if (commentsDrawerOpen) {
+      // Sidebar is open: Scroll to comment and activate reply box
+      const el = document.getElementById(`sidebar-comment-${activeComment.commentId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("field-highlight-pulse");
+        void el.offsetWidth;
+        el.classList.add("field-highlight-pulse");
+      }
+      setActiveReplyBoxId(activeComment.commentId);
+    } else {
+      // Sidebar is closed: Toggle pin state
+      setPinnedCommentCol((prev) => (prev === colLetter ? null : colLetter));
+    }
+  };
+
+  const handleTriangleMouseEnter = (colLetter) => {
+    if (commentsDrawerOpen) return;
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoveredCommentCol(colLetter);
+  };
+
+  const handleTriangleMouseLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setHoveredCommentCol(null);
+    }, 250);
+  };
+
+  // Comment API Actions
   const handlePostNewThread = async (text) => {
     if (!draftTarget) return;
     try {
@@ -693,7 +979,7 @@ export default function DCRReview({
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
       setDraftTarget(null);
-      showToast("Comment posted securely to Google Sheets", "success");
+      showToast("Comment posted to Google Sheets", "success");
     } catch (err) {
       showToast(`Failed to post comment: ${err.message}`, "error");
     }
@@ -796,6 +1082,7 @@ export default function DCRReview({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
+      setPinnedCommentCol(null);
       showToast(!currentResolvedStatus ? "Thread resolved" : "Thread reopened", "success");
     } catch (err) {
       showToast(`Failed to update status: ${err.message}`, "error");
@@ -820,15 +1107,10 @@ export default function DCRReview({
       if (!res.ok) throw new Error(data.error);
 
       setDcrData(data);
-      if (data.dropdownOptions) {
-        setDynamicDropdowns(data.dropdownOptions);
-      }
-      if (data.formLinks) {
-        setFormLinks(data.formLinks);
-      }
-      if (data.comments) {
-        setComments(data.comments);
-      }
+      if (data.dropdownOptions) setDynamicDropdowns(data.dropdownOptions);
+      if (data.formLinks) setFormLinks(data.formLinks);
+      if (data.comments) setComments(data.comments);
+
       const initialInputs = {};
       data.fields.forEach((f) => {
         initialInputs[f.colLetter] = f.value;
@@ -907,8 +1189,12 @@ export default function DCRReview({
   const commentsField = dcrData.fields.find((f) => f.colLetter === "AR");
   const activePhoto = photos[activePhotoIndex];
 
-  // Filter out resolved comments if toggle is off
-  const visibleComments = showResolvedComments ? comments : comments.filter(c => !c.resolved);
+  const visibleComments = showResolvedComments ? comments : comments.filter((c) => !c.resolved);
+
+  // Helper to find the active comment on a column
+  const getActiveCommentForCol = (colLetter) => {
+    return comments.find((c) => c.colLetter === colLetter && !c.resolved) || null;
+  };
 
   return (
     <div
@@ -940,7 +1226,7 @@ export default function DCRReview({
         .dcr-multi-select-item:hover { background-color: var(--bg-card-subtle, #f8f9fa); }
         .dcr-multi-select-item.selected { font-weight: 500; color: var(--btn-primary-bg, #1a73e8); }
 
-        /* Left-pane field hover trigger */
+        /* Left-pane field hover trigger for adding a comment */
         .hover-comment-btn { position: absolute; top: 4px; right: 6px; opacity: 0; font-size: 12px; background: var(--bg-card, #ffffff); border: 1px solid var(--border-color, #dadce0); border-radius: 4px; padding: 2px 6px; cursor: pointer; color: var(--text-muted, #5f6368); transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease; z-index: 9; font-weight: bold; }
         .dcr-field-container:hover .hover-comment-btn { opacity: 0.85; }
         .hover-comment-btn:hover { opacity: 1 !important; color: var(--btn-primary-bg, #1a73e8) !important; border-color: var(--btn-primary-bg, #1a73e8) !important; }
@@ -951,6 +1237,42 @@ export default function DCRReview({
         .post-action-btn { background: none; border: none; font-size: 10px; cursor: pointer; padding: 0; text-transform: uppercase; font-weight: 600; }
         .post-action-btn:hover { text-decoration: underline; }
 
+        /* Google Sheets Amber Corner Triangle Indicator */
+        .cell-comment-triangle {
+          width: 0;
+          height: 0;
+          border-top: 13px solid #f59e0b;
+          border-left: 13px solid transparent;
+          cursor: pointer;
+          transition: transform 0.15s ease, border-top-color 0.15s ease;
+        }
+        .cell-comment-triangle:hover {
+          border-top-color: #d97706;
+          transform: scale(1.15);
+        }
+
+        /* Floating Popover Comment Card */
+        .cell-comment-popover {
+          position: absolute;
+          top: 14px;
+          right: 0;
+          z-index: 1000;
+          width: 290px;
+          max-width: 90vw;
+          background: var(--bg-card);
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+          border: 1px solid var(--border-color);
+          border-radius: 8px;
+          padding: 12px;
+          box-sizing: border-box;
+          animation: fieldFadeIn 0.15s ease-out;
+        }
+
+        [data-theme='dark'] .cell-comment-popover {
+          background: #1e2530;
+          border-color: #3b4554;
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+        }
         [data-theme='dark'] .dcr-multi-select-btn { background: #1e2530; border-color: #3b4554; color: #e2e8f0; }
         [data-theme='dark'] .dcr-multi-select-popover { background: #1e2530; border-color: #3b4554; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
         [data-theme='dark'] .dcr-multi-select-item:hover { background-color: #273142; }
@@ -1096,41 +1418,61 @@ export default function DCRReview({
               Manager Approval & Sign-Off (Cols A & B)
             </h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
-              {managerSignOffs.map((f) => (
-                <div
-                  key={f.colLetter}
-                  id={`field-card-${f.colLetter}`}
-                  className="dcr-field-container"
-                  style={{
-                    background: "var(--bg-card-subtle)",
-                    padding: "12px",
-                    borderRadius: "6px",
-                    border: "1px solid var(--border-subtle)",
-                    transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-                    position: "relative"
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="hover-comment-btn"
-                    title="Add comment"
-                    onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
+              {managerSignOffs.map((f) => {
+                const activeComment = getActiveCommentForCol(f.colLetter);
+                return (
+                  <div
+                    key={f.colLetter}
+                    id={`field-card-${f.colLetter}`}
+                    className="dcr-field-container"
+                    style={{
+                      background: "var(--bg-card-subtle)",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-subtle)",
+                      transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+                      position: "relative",
+                    }}
                   >
-                    💬+
-                  </button>
-                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontWeight: 600, fontSize: "13px", marginBottom: "6px", color: "var(--text-main)" }}>
-                    <span>{f.header} ({f.colLetter})</span>
-                    <FieldIndicator status={fieldStatuses[f.colLetter]} />
-                  </label>
-                  <input
-                    type="text"
-                    className="dcr-input"
-                    value={formValues[f.colLetter] ?? ""}
-                    onChange={(e) => handleFieldChange(f.colLetter, e.target.value)}
-                    style={{ width: "100%" }}
-                  />
-                </div>
-              ))}
+                    {activeComment ? (
+                      <CellCommentMarker
+                        colLetter={f.colLetter}
+                        colHeaderName={f.header}
+                        comment={activeComment}
+                        commentsDrawerOpen={commentsDrawerOpen}
+                        isPinned={pinnedCommentCol === f.colLetter}
+                        isPreview={hoveredCommentCol === f.colLetter}
+                        onTriangleClick={(e) => handleTriangleClick(e, f.colLetter, activeComment)}
+                        onMouseEnter={() => handleTriangleMouseEnter(f.colLetter)}
+                        onMouseLeave={handleTriangleMouseLeave}
+                        onClose={() => setPinnedCommentCol(null)}
+                        onReply={handlePostReply}
+                        onResolve={handleToggleResolve}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="hover-comment-btn"
+                        title="Add comment"
+                        onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
+                      >
+                        💬+
+                      </button>
+                    )}
+                    <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontWeight: 600, fontSize: "13px", marginBottom: "6px", color: "var(--text-main)" }}>
+                      <span>{f.header} ({f.colLetter})</span>
+                      <FieldIndicator status={fieldStatuses[f.colLetter]} />
+                    </label>
+                    <input
+                      type="text"
+                      className="dcr-input"
+                      value={formValues[f.colLetter] ?? ""}
+                      onChange={(e) => handleFieldChange(f.colLetter, e.target.value)}
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1155,6 +1497,7 @@ export default function DCRReview({
                 const isExpanded = !!expandedFields[f.colLetter];
                 const textValue = String(f.value || "");
                 const isLong = textValue.length > 55 || textValue.split("\n").length > 2;
+                const activeComment = getActiveCommentForCol(f.colLetter);
 
                 return (
                   <div
@@ -1172,17 +1515,34 @@ export default function DCRReview({
                       height: "100%",
                       boxSizing: "border-box",
                       transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-                      position: "relative"
+                      position: "relative",
                     }}
                   >
-                    <button
-                      type="button"
-                      className="hover-comment-btn"
-                      title="Add comment"
-                      onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
-                    >
-                      💬+
-                    </button>
+                    {activeComment ? (
+                      <CellCommentMarker
+                        colLetter={f.colLetter}
+                        colHeaderName={f.header}
+                        comment={activeComment}
+                        commentsDrawerOpen={commentsDrawerOpen}
+                        isPinned={pinnedCommentCol === f.colLetter}
+                        isPreview={hoveredCommentCol === f.colLetter}
+                        onTriangleClick={(e) => handleTriangleClick(e, f.colLetter, activeComment)}
+                        onMouseEnter={() => handleTriangleMouseEnter(f.colLetter)}
+                        onMouseLeave={handleTriangleMouseLeave}
+                        onClose={() => setPinnedCommentCol(null)}
+                        onReply={handlePostReply}
+                        onResolve={handleToggleResolve}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="hover-comment-btn"
+                        title="Add comment"
+                        onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
+                      >
+                        💬+
+                      </button>
+                    )}
                     <div className="spec-header-clamped" style={{ fontSize: "11px", color: "var(--text-subtle)", textTransform: "uppercase", marginBottom: "10px" }} title={`${f.header} (${f.colLetter})`}>
                       {f.header} ({f.colLetter})
                     </div>
@@ -1328,6 +1688,7 @@ export default function DCRReview({
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
                 {postSpecsFields.map((f) => {
                   const currentValue = formValues[f.colLetter] ?? "";
+                  const activeComment = getActiveCommentForCol(f.colLetter);
 
                   if (f.colLetter === "AI") {
                     const contractorOptions = (dynamicDropdowns?.AI && dynamicDropdowns.AI.length > 0 ? dynamicDropdowns.AI : propDropdownOptions?.AI) || [];
@@ -1341,14 +1702,31 @@ export default function DCRReview({
                         ref={contractorDropdownRef}
                         style={{ background: "var(--bg-card-subtle)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-subtle)", position: "relative", transition: "border-color 0.2s ease, box-shadow 0.2s ease" }}
                       >
-                        <button
-                          type="button"
-                          className="hover-comment-btn"
-                          title="Add comment"
-                          onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
-                        >
-                          💬+
-                        </button>
+                        {activeComment ? (
+                          <CellCommentMarker
+                            colLetter={f.colLetter}
+                            colHeaderName={f.header}
+                            comment={activeComment}
+                            commentsDrawerOpen={commentsDrawerOpen}
+                            isPinned={pinnedCommentCol === f.colLetter}
+                            isPreview={hoveredCommentCol === f.colLetter}
+                            onTriangleClick={(e) => handleTriangleClick(e, f.colLetter, activeComment)}
+                            onMouseEnter={() => handleTriangleMouseEnter(f.colLetter)}
+                            onMouseLeave={handleTriangleMouseLeave}
+                            onClose={() => setPinnedCommentCol(null)}
+                            onReply={handlePostReply}
+                            onResolve={handleToggleResolve}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="hover-comment-btn"
+                            title="Add comment"
+                            onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
+                          >
+                            💬+
+                          </button>
+                        )}
                         <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontWeight: 600, fontSize: "13px", marginBottom: "6px", color: "var(--text-main)" }}>
                           <span>{f.header} ({f.colLetter})</span>
                           <FieldIndicator status={fieldStatuses[f.colLetter]} />
@@ -1402,14 +1780,31 @@ export default function DCRReview({
                       className="dcr-field-container"
                       style={{ background: "var(--bg-card-subtle)", padding: "12px", borderRadius: "6px", border: "1px solid var(--border-subtle)", transition: "border-color 0.2s ease, box-shadow 0.2s ease", position: "relative" }}
                     >
-                      <button
-                        type="button"
-                        className="hover-comment-btn"
-                        title="Add comment"
-                        onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
-                      >
-                        💬+
-                      </button>
+                      {activeComment ? (
+                        <CellCommentMarker
+                          colLetter={f.colLetter}
+                          colHeaderName={f.header}
+                          comment={activeComment}
+                          commentsDrawerOpen={commentsDrawerOpen}
+                          isPinned={pinnedCommentCol === f.colLetter}
+                          isPreview={hoveredCommentCol === f.colLetter}
+                          onTriangleClick={(e) => handleTriangleClick(e, f.colLetter, activeComment)}
+                          onMouseEnter={() => handleTriangleMouseEnter(f.colLetter)}
+                          onMouseLeave={handleTriangleMouseLeave}
+                          onClose={() => setPinnedCommentCol(null)}
+                          onReply={handlePostReply}
+                          onResolve={handleToggleResolve}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="hover-comment-btn"
+                          title="Add comment"
+                          onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(f.colLetter, f.header); }}
+                        >
+                          💬+
+                        </button>
+                      )}
                       <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontWeight: 600, fontSize: "13px", marginBottom: "6px", color: "var(--text-main)" }}>
                         <span>{f.header} ({f.colLetter})</span>
                         <FieldIndicator status={fieldStatuses[f.colLetter]} />
@@ -1443,17 +1838,34 @@ export default function DCRReview({
                 marginBottom: "24px",
                 boxShadow: "var(--shadow-card)",
                 transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-                position: "relative"
+                position: "relative",
               }}
             >
-              <button
-                type="button"
-                className="hover-comment-btn"
-                title="Add comment"
-                onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(commentsField.colLetter, commentsField.header || 'Comments'); }}
-              >
-                💬+
-              </button>
+              {getActiveCommentForCol(commentsField.colLetter) ? (
+                <CellCommentMarker
+                  colLetter={commentsField.colLetter}
+                  colHeaderName={commentsField.header || "Comments"}
+                  comment={getActiveCommentForCol(commentsField.colLetter)}
+                  commentsDrawerOpen={commentsDrawerOpen}
+                  isPinned={pinnedCommentCol === commentsField.colLetter}
+                  isPreview={hoveredCommentCol === commentsField.colLetter}
+                  onTriangleClick={(e) => handleTriangleClick(e, commentsField.colLetter, getActiveCommentForCol(commentsField.colLetter))}
+                  onMouseEnter={() => handleTriangleMouseEnter(commentsField.colLetter)}
+                  onMouseLeave={handleTriangleMouseLeave}
+                  onClose={() => setPinnedCommentCol(null)}
+                  onReply={handlePostReply}
+                  onResolve={handleToggleResolve}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="hover-comment-btn"
+                  title="Add comment"
+                  onClick={(e) => { e.stopPropagation(); handleInitiateNewComment(commentsField.colLetter, commentsField.header || 'Comments'); }}
+                >
+                  💬+
+                </button>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
                 <h3 style={{ margin: 0, fontSize: "16px", color: "var(--text-main)", display: "flex", alignItems: "center" }}>
                   {commentsField.header || "Comments"} ({commentsField.colLetter})
@@ -1571,242 +1983,236 @@ export default function DCRReview({
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 {visibleComments.map((c) => {
-  const fieldData = dcrData?.fields?.find((f) => f.colLetter === c.colLetter);
-  const colHeaderName = fieldData ? fieldData.header : `Column ${c.colLetter}`;
-  const isAuthor = userProfile && c.authorEmail && c.authorEmail.toLowerCase() === userProfile.email.toLowerCase();
+                  const fieldData = dcrData?.fields?.find((f) => f.colLetter === c.colLetter);
+                  const colHeaderName = fieldData ? fieldData.header : `Column ${c.colLetter}`;
+                  const isAuthor = userProfile && c.authorEmail && c.authorEmail.toLowerCase() === userProfile.email.toLowerCase();
 
+                  return (
+                    <div
+                      key={c.commentId}
+                      id={`sidebar-comment-${c.commentId}`}
+                      style={{
+                        background: "var(--bg-card-subtle)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "6px",
+                        padding: "12px",
+                        fontSize: "13px",
+                        opacity: c.resolved ? 0.75 : 1,
+                        transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+                      }}
+                    >
+                      {/* Thread Header with Unambiguous Status / Actions */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <span
+                          title={colHeaderName}
+                          style={{
+                            fontWeight: 700,
+                            color: "var(--btn-primary-bg)",
+                            fontSize: "12px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            flex: 1,
+                            marginRight: "8px",
+                          }}
+                        >
+                          {colHeaderName}
+                        </span>
 
-  return (
-    <div
-      key={c.commentId}
-      style={{
-        background: "var(--bg-card-subtle)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: "6px",
-        padding: "12px",
-        fontSize: "13px",
-        opacity: c.resolved ? 0.75 : 1,
-      }}
-    >
-      {/* Thread Header with Unambiguous Status / Actions */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-        <span
-          title={colHeaderName}
-          style={{
-            fontWeight: 700,
-            color: "var(--btn-primary-bg)",
-            fontSize: "12px",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            flex: 1,
-            marginRight: "8px"
-          }}
-        >
-          {colHeaderName}
-        </span>
-
-
-        {!c.isNote && (
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
-            {c.resolved ? (
-              <>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: "#16a34a",
-                    background: "rgba(22, 163, 74, 0.12)",
-                    padding: "2px 6px",
-                    borderRadius: "4px",
-                    fontWeight: 600,
-                  }}
-                >
-                  ✓ Resolved
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleToggleResolve(c.commentId, c.resolved)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    padding: 0,
-                    cursor: "pointer",
-                    fontSize: "11px",
-                    color: "var(--text-muted)",
-                    fontWeight: 600,
-                  }}
-                >
-                  ↺ Reopen
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handleToggleResolve(c.commentId, c.resolved)}
-                className="btn-secondary"
-                style={{
-                  padding: "2px 8px",
-                  fontSize: "11px",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                }}
-              >
-                Resolve
-              </button>
-            )}
-          </div>
-        )}
-        {c.isNote && (
-          <span style={{ fontSize: "11px", color: "var(--text-subtle)", fontWeight: 500, flexShrink: 0 }}>Note</span>
-        )}
-      </div>
-
-
-      {/* Main Comment Text */}
-      <div className="comment-post-container" style={{ position: "relative", marginBottom: "8px" }}>
-        {c.plainTextQuote && (
-          <div style={{ fontSize: "11px", fontStyle: "italic", color: "var(--text-subtle)", marginBottom: "4px", borderLeft: "2px solid var(--border-color)", paddingLeft: "6px" }}>
-            "{decodeHtmlEntities(c.plainTextQuote)}"
-          </div>
-        )}
-
-
-        {editingCommentId === c.commentId ? (
-          <InlineCommentComposer
-            initialValue={decodeHtmlEntities(c.text)}
-            buttonText="Save"
-            onSave={(newText) => handleEditThread(c.commentId, newText)}
-            onCancel={() => setEditingCommentId(null)}
-          />
-        ) : (
-          <div>
-            <div style={{ color: "var(--text-main)", lineHeight: "1.4", wordBreak: "break-word", marginBottom: "4px" }}>
-              {decodeHtmlEntities(c.text)}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: "11px", color: "var(--text-subtle)" }}>
-                — {c.authorName || c.authorEmail}
-                {c.timestamp && ` • ${new Date(c.timestamp).toLocaleDateString([], { month: "short", day: "numeric" })}`}
-              </div>
-              {isAuthor && !c.isNote && (
-                <div className="post-actions">
-                  <button type="button" onClick={() => setEditingCommentId(c.commentId)} className="post-action-btn" style={{ color: "var(--btn-primary-bg)" }}>Edit</button>
-                  <button type="button" onClick={() => handleDeleteThread(c.commentId)} className="post-action-btn" style={{ color: "#ef4444" }}>Delete</button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-
-      {/* Compact Inline Replies (No Extra Name Line) */}
-      {c.replies && c.replies.length > 0 && (
-        <div style={{ borderLeft: "2px solid var(--border-color)", paddingLeft: "8px", margin: "6px 0", display: "flex", flexDirection: "column", gap: "6px" }}>
-          {c.replies.map((rep) => {
-            const isRepAuthor = userProfile && rep.authorEmail && rep.authorEmail.toLowerCase() === userProfile.email.toLowerCase();
-            return (
-              <div key={rep.replyId} className="comment-post-container" style={{ fontSize: "12px", position: "relative" }}>
-                {editingReplyId === rep.replyId ? (
-                  <InlineCommentComposer
-                    initialValue={decodeHtmlEntities(rep.text)}
-                    buttonText="Save"
-                    onSave={(newText) => handleEditReply(c.commentId, rep.replyId, newText)}
-                    onCancel={() => setEditingReplyId(null)}
-                  />
-                ) : (
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
-                    <div style={{ color: "var(--text-main)", lineHeight: "1.35", wordBreak: "break-word" }}>
-                      <strong style={{ color: "var(--btn-primary-bg)", marginRight: "6px" }}>
-                        {rep.authorName}:
-                      </strong>
-                      {decodeHtmlEntities(rep.text)}
-                    </div>
-                    {isRepAuthor && (
-                      <div className="post-actions" style={{ flexShrink: 0 }}>
-                        <button type="button" onClick={() => setEditingReplyId(rep.replyId)} className="post-action-btn" style={{ color: "var(--btn-primary-bg)" }}>Edit</button>
-                        <button type="button" onClick={() => handleDeleteReply(c.commentId, rep.replyId)} className="post-action-btn" style={{ color: "#ef4444" }}>Delete</button>
+                        {!c.isNote && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                            {c.resolved ? (
+                              <>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    color: "#16a34a",
+                                    background: "rgba(22, 163, 74, 0.12)",
+                                    padding: "2px 6px",
+                                    borderRadius: "4px",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ✓ Resolved
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleResolve(c.commentId, c.resolved)}
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    padding: 0,
+                                    cursor: "pointer",
+                                    fontSize: "11px",
+                                    color: "var(--text-muted)",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ↺ Reopen
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleResolve(c.commentId, c.resolved)}
+                                className="btn-secondary"
+                                style={{
+                                  padding: "2px 8px",
+                                  fontSize: "11px",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Resolve
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {c.isNote && (
+                          <span style={{ fontSize: "11px", color: "var(--text-subtle)", fontWeight: 500, flexShrink: 0 }}>Note</span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
 
+                      {/* Main Comment Text */}
+                      <div className="comment-post-container" style={{ position: "relative", marginBottom: "8px" }}>
+                        {c.plainTextQuote && (
+                          <div style={{ fontSize: "11px", fontStyle: "italic", color: "var(--text-subtle)", marginBottom: "4px", borderLeft: "2px solid var(--border-color)", paddingLeft: "6px" }}>
+                            "{decodeHtmlEntities(c.plainTextQuote)}"
+                          </div>
+                        )}
 
-      {/* Reply Trigger Box */}
-      {!c.resolved && !c.isNote && activeReplyBoxId !== c.commentId && (
-        <div style={{ marginBottom: "8px", paddingLeft: "10px" }}>
-          <button
-            type="button"
-            onClick={() => setActiveReplyBoxId(c.commentId)}
-            style={{ background: "none", border: "none", padding: 0, fontSize: "11px", color: "var(--text-subtle)", cursor: "pointer", fontWeight: 600 }}
-          >
-            Reply...
-          </button>
-        </div>
-      )}
+                        {editingCommentId === c.commentId ? (
+                          <InlineCommentComposer
+                            initialValue={decodeHtmlEntities(c.text)}
+                            buttonText="Save"
+                            onSave={(newText) => handleEditThread(c.commentId, newText)}
+                            onCancel={() => setEditingCommentId(null)}
+                          />
+                        ) : (
+                          <div>
+                            <div style={{ color: "var(--text-main)", lineHeight: "1.4", wordBreak: "break-word", marginBottom: "4px" }}>
+                              {decodeHtmlEntities(c.text)}
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ fontSize: "11px", color: "var(--text-subtle)" }}>
+                                — {c.authorName || c.authorEmail}
+                                {c.timestamp && ` • ${new Date(c.timestamp).toLocaleDateString([], { month: "short", day: "numeric" })}`}
+                              </div>
+                              {isAuthor && !c.isNote && (
+                                <div className="post-actions">
+                                  <button type="button" onClick={() => setEditingCommentId(c.commentId)} className="post-action-btn" style={{ color: "var(--btn-primary-bg)" }}>Edit</button>
+                                  <button type="button" onClick={() => handleDeleteThread(c.commentId)} className="post-action-btn" style={{ color: "#ef4444" }}>Delete</button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
+                      {/* Compact Inline Replies */}
+                      {c.replies && c.replies.length > 0 && (
+                        <div style={{ borderLeft: "2px solid var(--border-color)", paddingLeft: "8px", margin: "6px 0", display: "flex", flexDirection: "column", gap: "6px" }}>
+                          {c.replies.map((rep) => {
+                            const isRepAuthor = userProfile && rep.authorEmail && rep.authorEmail.toLowerCase() === userProfile.email.toLowerCase();
+                            return (
+                              <div key={rep.replyId} className="comment-post-container" style={{ fontSize: "12px", position: "relative" }}>
+                                {editingReplyId === rep.replyId ? (
+                                  <InlineCommentComposer
+                                    initialValue={decodeHtmlEntities(rep.text)}
+                                    buttonText="Save"
+                                    onSave={(newText) => handleEditReply(c.commentId, rep.replyId, newText)}
+                                    onCancel={() => setEditingReplyId(null)}
+                                  />
+                                ) : (
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                                    <div style={{ color: "var(--text-main)", lineHeight: "1.35", wordBreak: "break-word" }}>
+                                      <strong style={{ color: "var(--btn-primary-bg)", marginRight: "6px" }}>
+                                        {rep.authorName}:
+                                      </strong>
+                                      {decodeHtmlEntities(rep.text)}
+                                    </div>
+                                    {isRepAuthor && (
+                                      <div className="post-actions" style={{ flexShrink: 0 }}>
+                                        <button type="button" onClick={() => setEditingReplyId(rep.replyId)} className="post-action-btn" style={{ color: "var(--btn-primary-bg)" }}>Edit</button>
+                                        <button type="button" onClick={() => handleDeleteReply(c.commentId, rep.replyId)} className="post-action-btn" style={{ color: "#ef4444" }}>Delete</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
-      {activeReplyBoxId === c.commentId && (
-        <div style={{ paddingLeft: "10px", borderLeft: "2px solid var(--btn-primary-bg)", margin: "4px 0 10px 0" }}>
-          <InlineCommentComposer
-            placeholder="Reply..."
-            buttonText="Reply"
-            onSave={(text) => handlePostReply(c.commentId, text)}
-            onCancel={() => setActiveReplyBoxId(null)}
-          />
-        </div>
-      )}
+                      {/* Reply Trigger Box */}
+                      {!c.resolved && !c.isNote && activeReplyBoxId !== c.commentId && (
+                        <div style={{ marginBottom: "8px", paddingLeft: "10px" }}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveReplyBoxId(c.commentId)}
+                            style={{ background: "none", border: "none", padding: 0, fontSize: "11px", color: "var(--text-subtle)", cursor: "pointer", fontWeight: 600 }}
+                          >
+                            Reply...
+                          </button>
+                        </div>
+                      )}
 
+                      {activeReplyBoxId === c.commentId && (
+                        <div style={{ paddingLeft: "10px", borderLeft: "2px solid var(--btn-primary-bg)", margin: "4px 0 10px 0" }}>
+                          <InlineCommentComposer
+                            placeholder="Reply..."
+                            buttonText="Reply"
+                            onSave={(text) => handlePostReply(c.commentId, text)}
+                            onCancel={() => setActiveReplyBoxId(null)}
+                          />
+                        </div>
+                      )}
 
-      {/* Bottom Row: Cell Coordinate & Actions */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          borderTop: "1px solid var(--border-subtle)",
-          paddingTop: "8px",
-          marginTop: "4px",
-        }}
-      >
-        <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.3px" }}>
-          {c.cellCoordinate}
-        </span>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            type="button"
-            onClick={() => handleHighlightField(c.colLetter)}
-            className="btn-secondary"
-            style={{ padding: "3px 8px", fontSize: "11px", borderRadius: "4px" }}
-          >
-            Highlight Field
-          </button>
-          <a
-            href={c.openInSheetUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-secondary"
-            style={{
-              padding: "3px 8px",
-              fontSize: "11px",
-              borderRadius: "4px",
-              textDecoration: "none",
-              color: "var(--btn-primary-bg)",
-              fontWeight: 600,
-            }}
-          >
-            Open in Sheet ↗
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-})}
+                      {/* Card Footer Tools */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          borderTop: "1px solid var(--border-subtle)",
+                          paddingTop: "8px",
+                          marginTop: "4px",
+                        }}
+                      >
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.3px" }}>
+                          {c.cellCoordinate}
+                        </span>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleHighlightField(c.colLetter)}
+                            className="btn-secondary"
+                            style={{ padding: "3px 8px", fontSize: "11px", borderRadius: "4px" }}
+                          >
+                            Highlight Field
+                          </button>
+                          <a
+                            href={c.openInSheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-secondary"
+                            style={{
+                              padding: "3px 8px",
+                              fontSize: "11px",
+                              borderRadius: "4px",
+                              textDecoration: "none",
+                              color: "var(--btn-primary-bg)",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Open in Sheet ↗
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
