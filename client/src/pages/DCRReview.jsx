@@ -2190,7 +2190,7 @@ export default function DCRReview({
                             className="btn-secondary"
                             style={{ padding: "3px 8px", fontSize: "11px", borderRadius: "4px" }}
                           >
-                            Highlight Field
+                            Highlight
                           </button>
                           <a
                             href={c.openInSheetUrl}
