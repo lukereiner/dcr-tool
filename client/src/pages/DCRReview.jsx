@@ -700,6 +700,20 @@ export default function DCRReview({
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const dragCounterRef = useRef(0);
 
+  // File Delete Confirmation Modal States
+  const [fileToDelete, setFileToDelete] = useState(null);
+  const [isDeletingFile, setIsDeletingFile] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && fileToDelete && !isDeletingFile) {
+        setFileToDelete(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fileToDelete, isDeletingFile]);
+
   const [driveViewMode, setDriveViewMode] = useState(() => {
     return localStorage.getItem("dcr_drive_view_mode") || "photos";
   });
@@ -1077,18 +1091,14 @@ export default function DCRReview({
     }
   };
 
-  const handleDeleteDriveFile = async (file) => {
+  const confirmDeleteDriveFile = async () => {
+    if (!fileToDelete) return;
+    const targetFile = fileToDelete;
     const folderId = extractDriveFolderId(folderUrl);
-    if (
-      !window.confirm(
-        `Move "${file.name}" to Google Drive trash? (Recoverable for 30 days)`,
-      )
-    ) {
-      return;
-    }
 
+    setIsDeletingFile(true);
     try {
-      const res = await fetch(`/api/drive/file/${file.id}`, {
+      const res = await fetch(`/api/drive/file/${targetFile.id}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -1099,13 +1109,16 @@ export default function DCRReview({
       if (!res.ok)
         throw new Error(data.error || "Failed to move file to trash");
 
-      showToast(`"${file.name}" moved to Google Drive trash`, "success");
+      showToast(`"${targetFile.name}" moved to Google Drive trash`, "success");
+      setFileToDelete(null);
       if (folderId) {
         await fetchFolderPhotos(folderId);
       }
     } catch (err) {
       console.error("Delete file error:", err);
       showToast(`Failed to delete file: ${err.message}`, "error");
+    } finally {
+      setIsDeletingFile(false);
     }
   };
 
@@ -1507,6 +1520,19 @@ export default function DCRReview({
         [data-theme='dark'] .dcr-multi-select-popover { background: #1e2530; border-color: #3b4554; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
         [data-theme='dark'] .dcr-multi-select-item:hover { background-color: #273142; }
         [data-theme='dark'] .dcr-multi-select-item.selected { color: #60a5fa; }
+
+        .dcr-confirm-modal-card {
+  background: var(--bg-card, #ffffff);
+  color: var(--text-main, #202124);
+  border: 1px solid var(--border-color, #dadce0);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+}
+[data-theme='dark'] .dcr-confirm-modal-card {
+  background: #1e2530;
+  color: #f1f5f9;
+  border-color: #3b4554;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
+}
       `}</style>
 
       {/* Top Navigation Bar */}
@@ -2455,7 +2481,7 @@ export default function DCRReview({
                                   </a>
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteDriveFile(file)}
+                                    onClick={() => setFileToDelete(file)}
                                     className="btn-secondary"
                                     style={{
                                       height: "26px",
@@ -2489,7 +2515,6 @@ export default function DCRReview({
                                       <path d="M14 11v6" />
                                       <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                                     </svg>
-                                    
                                   </button>
                                 </div>
                               </td>
@@ -3470,6 +3495,170 @@ export default function DCRReview({
           </div>
         )}
       </div>
+
+      {/* Delete Drive File Confirmation Modal */}
+      {fileToDelete && (
+        <div
+          onClick={() => {
+            if (!isDeletingFile) setFileToDelete(null);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.55)",
+            backdropFilter: "blur(2px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 99999,
+            padding: "20px",
+            animation: "fieldFadeIn 0.15s ease-out",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="dcr-confirm-modal-card"
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              borderRadius: "10px",
+              padding: "22px 24px",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                marginBottom: "12px",
+              }}
+            >
+              <div
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "8px",
+                  background: "rgba(220, 38, 38, 0.12)",
+                  color: "#dc2626",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                </svg>
+              </div>
+              <h3
+                style={{
+                  margin: 0,
+                  fontSize: "17px",
+                  fontWeight: 600,
+                  color: "var(--text-main)",
+                }}
+              >
+                Move File to Trash?
+              </h3>
+            </div>
+
+            <p
+              style={{
+                margin: "0 0 8px 0",
+                fontSize: "14px",
+                lineHeight: 1.5,
+                color: "var(--text-main)",
+                wordBreak: "break-word",
+              }}
+            >
+              Are you sure you want to move{" "}
+              <strong>"{fileToDelete.name}"</strong> to Google Drive trash?
+            </p>
+            <p
+              style={{
+                margin: "0 0 20px 0",
+                fontSize: "12px",
+                color: "var(--text-muted)",
+              }}
+            >
+              Files in Google Drive trash remain recoverable for 30 days.
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+              }}
+            >
+              <button
+                type="button"
+                disabled={isDeletingFile}
+                onClick={() => setFileToDelete(null)}
+                className="btn-secondary"
+                style={{
+                  padding: "7px 14px",
+                  fontSize: "13px",
+                  borderRadius: "6px",
+                  cursor: isDeletingFile ? "not-allowed" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingFile}
+                onClick={confirmDeleteDriveFile}
+                style={{
+                  padding: "7px 16px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  cursor: isDeletingFile ? "not-allowed" : "pointer",
+                  opacity: isDeletingFile ? 0.75 : 1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                {isDeletingFile && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: "12px",
+                      height: "12px",
+                      border: "2px solid rgba(255, 255, 255, 0.35)",
+                      borderTop: "2px solid #ffffff",
+                      borderRadius: "50%",
+                      animation: "btnSpin 0.7s linear infinite",
+                    }}
+                  />
+                )}
+                <span>
+                  {isDeletingFile ? "Moving to Trash..." : "Move to Trash"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen Lightbox Modal */}
       {lightboxOpen && activePhoto && (
