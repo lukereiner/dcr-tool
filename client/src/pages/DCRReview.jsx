@@ -113,96 +113,130 @@ function getFileBadge(mimeType, name) {
   };
 }
 
-// Auto-expanding compact textarea (starts at 1 line and expands as text grows)
+// Uniform 38px single-line field at rest with ellipsis + subtle '▾ / ▴' toggle,
+// expanding on toggle click or focus and collapsing back when closed/blurred.
 function AutoResizeTextarea({
   value,
   onChange,
   placeholder,
-  isExpanded,
-  onToggleExpand,
   className = "dcr-input",
   style = {},
 }) {
   const textareaRef = useRef(null);
-  const [needsExpand, setNeedsExpand] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
 
-  const adjustHeight = useCallback(() => {
+  const expanded = isFocused || isExpanded;
+
+  const syncDimensions = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
 
-    // Measure full natural content height
-    el.style.height = "auto";
-    const fullHeight = el.scrollHeight;
+    const strVal = String(value || "");
+    const hasNewline = strVal.includes("\n");
 
-    // Two lines at 13px * 1.4 line-height (~36px) + 14px vertical padding = ~50px
-    const twoLineMaxHeight = 52;
-    const isOverflowing = fullHeight > twoLineMaxHeight + 4;
-    setNeedsExpand(isOverflowing);
-
-    if (isExpanded) {
+    if (expanded) {
+      el.style.whiteSpace = "pre-wrap";
+      el.style.height = "auto";
+      const fullHeight = el.scrollHeight;
       el.style.height = `${Math.max(38, fullHeight)}px`;
-      el.style.overflowY = "hidden";
-    } else if (isOverflowing) {
-      el.style.height = `${twoLineMaxHeight}px`;
-      el.style.overflowY = "hidden";
+      setIsOverflowing(hasNewline || fullHeight > 44);
     } else {
-      // Single-line content stays at exact 38px to align with inputs and dropdowns
-      el.style.height = `${Math.max(38, fullHeight)}px`;
-      el.style.overflowY = "hidden";
+      el.style.whiteSpace = "nowrap";
+      el.style.height = "38px";
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+      const hasHorizontalOverflow = el.scrollWidth > el.clientWidth + 1;
+      setIsOverflowing(hasNewline || hasHorizontalOverflow);
     }
-  }, [isExpanded]);
+  }, [expanded, value]);
 
   useLayoutEffect(() => {
-    adjustHeight();
-  }, [value, isExpanded, adjustHeight]);
+    syncDimensions();
+  }, [syncDimensions]);
 
   useEffect(() => {
-    window.addEventListener("resize", adjustHeight);
-    return () => window.removeEventListener("resize", adjustHeight);
-  }, [adjustHeight]);
+    window.addEventListener("resize", syncDimensions);
+    return () => window.removeEventListener("resize", syncDimensions);
+  }, [syncDimensions]);
+
+  const handleToggle = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (expanded) {
+      setIsExpanded(false);
+      setIsFocused(false);
+      textareaRef.current?.blur();
+    } else {
+      setIsExpanded(true);
+    }
+  };
 
   return (
-    <div>
+    <div style={{ position: "relative", width: "100%" }}>
       <textarea
         ref={textareaRef}
         rows={1}
         className={className}
         value={value}
         placeholder={placeholder}
+        title={!expanded && isOverflowing ? String(value || "") : undefined}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => {
+          setIsFocused(false);
+          setIsExpanded(false);
+        }}
         onChange={(e) => {
           onChange(e);
-          adjustHeight();
         }}
         style={{
           width: "100%",
           minHeight: "38px",
-          padding: "7px 10px",
+          height: expanded ? "auto" : "38px",
+          paddingTop: "8px",
+          paddingBottom: "8px",
+          paddingLeft: "10px",
+          paddingRight: isOverflowing ? "26px" : "10px",
           fontSize: "13px",
-          lineHeight: "1.4",
+          lineHeight: "20px",
           margin: 0,
           resize: "none",
+          overflow: "hidden",
+          whiteSpace: expanded ? "pre-wrap" : "nowrap",
+          overflowWrap: expanded ? "break-word" : "normal",
+          textOverflow: expanded ? "clip" : "ellipsis",
           fontFamily: "inherit",
           boxSizing: "border-box",
           display: "block",
           ...style,
         }}
       />
-      {needsExpand && (
-        <div
+      {isOverflowing && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={expanded ? "Collapse text" : "Expand text"}
+          title={expanded ? "Collapse" : "Expand"}
+          onMouseDown={handleToggle}
           style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            marginTop: "4px",
+            position: "absolute",
+            right: "8px",
+            top: expanded ? "11px" : "50%",
+            transform: expanded ? "none" : "translateY(-50%)",
+            background: "none",
+            border: "none",
+            padding: "2px",
+            margin: 0,
+            fontSize: "11px",
+            lineHeight: 1,
+            color: "var(--text-subtle, #5f6368)",
+            cursor: "pointer",
+            opacity: 0.85,
           }}
         >
-          <button
-            type="button"
-            onClick={onToggleExpand}
-            className="spec-expand-btn"
-          >
-            {isExpanded ? "Less ▲" : "More ▼"}
-          </button>
-        </div>
+          {expanded ? "▴" : "▾"}
+        </button>
       )}
     </div>
   );
@@ -508,6 +542,69 @@ function InlineCommentComposer({
   );
 }
 
+// Floating Cell Popover for Creating a New Comment
+function NewCommentPopover({ colHeaderName, onSave, onClose }) {
+  return (
+    <div
+      style={{ position: "absolute", top: 0, right: 0, zIndex: 1050 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        className="cell-comment-popover"
+        style={{ top: "6px", right: "6px" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "8px",
+            paddingBottom: "6px",
+            borderBottom: "1px solid var(--border-subtle)",
+          }}
+        >
+          <span
+            style={{
+              fontWeight: 700,
+              color: "var(--btn-primary-bg)",
+              fontSize: "12px",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "220px",
+            }}
+            title={colHeaderName}
+          >
+            {colHeaderName}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: "14px",
+              cursor: "pointer",
+              color: "var(--text-muted)",
+              padding: "0 2px",
+            }}
+            title="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <InlineCommentComposer
+          placeholder="Add a comment..."
+          buttonText="Comment"
+          autoFocus={true}
+          onSave={onSave}
+          onCancel={onClose}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Cell Comment Marker (Amber Triangle + Hover/Pin Popover)
 function CellCommentMarker({
   colLetter,
@@ -526,11 +623,17 @@ function CellCommentMarker({
   const [isReplying, setIsReplying] = useState(false);
   const popoverRef = useRef(null);
 
-  const isVisible = (isPreview || isPinned) && !commentsDrawerOpen;
+  // Show card when pinned (even if sidebar is open after posting) or on hover preview when sidebar is closed
+  const isVisible = isPinned || (isPreview && !commentsDrawerOpen);
 
   return (
     <div
-      style={{ position: "absolute", top: 0, right: 0, zIndex: 12 }}
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        zIndex: isVisible ? 1050 : 12,
+      }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -538,7 +641,7 @@ function CellCommentMarker({
         className="cell-comment-triangle"
         onClick={onTriangleClick}
         title={
-          commentsDrawerOpen
+          commentsDrawerOpen && !isPinned
             ? "Click to focus in sidebar"
             : isPinned
               ? "Click to unpin"
@@ -758,7 +861,7 @@ export default function DCRReview({
 
   // Main sheet ('Cable Replacement') form values
   const [formValues, setFormValues] = useState({});
-  // Source-of-truth sheet ('DCR Form Responses') form values
+  // Source-of-truth sheet ('DCR Form Responses') form values (keyed by formRespColLetter B..W)
   const [formResponseValues, setFormResponseValues] = useState({});
   const [formResponseDropdowns, setFormResponseDropdowns] = useState(
     FORM_RESPONSE_DROPDOWN_FALLBACKS,
@@ -776,13 +879,13 @@ export default function DCRReview({
   const [commentsDrawerOpen, setCommentsDrawerOpen] = useState(false);
   const [showResolvedComments, setShowResolvedComments] = useState(false);
 
-  // Floating Popover States (Hover Preview & Pinning)
+  // Floating Popover States (Hover Preview, Pinning, and New Comment Creation)
   const [hoveredCommentCol, setHoveredCommentCol] = useState(null);
   const [pinnedCommentCol, setPinnedCommentCol] = useState(null);
+  const [newCommentCol, setNewCommentCol] = useState(null);
   const hoverTimeoutRef = useRef(null);
 
   // States for Sidebar Inline Composers
-  const [draftTarget, setDraftTarget] = useState(null);
   const [activeReplyBoxId, setActiveReplyBoxId] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editingReplyId, setEditingReplyId] = useState(null);
@@ -791,7 +894,7 @@ export default function DCRReview({
   const [dirtyFields, setDirtyFields] = useState(new Set());
   const [fieldStatuses, setFieldStatuses] = useState({});
 
-  // Dirty tracking for 'DCR Form Responses'
+  // Dirty tracking for 'DCR Form Responses' (keyed by formRespColLetter B..W)
   const [dirtyFormResponseFields, setDirtyFormResponseFields] = useState(
     new Set(),
   );
@@ -840,13 +943,19 @@ export default function DCRReview({
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === "Escape" && fileToDelete && !isDeletingFile) {
-        setFileToDelete(null);
+      if (e.key === "Escape") {
+        if (fileToDelete && !isDeletingFile) {
+          setFileToDelete(null);
+        } else if (newCommentCol) {
+          setNewCommentCol(null);
+        } else if (pinnedCommentCol) {
+          setPinnedCommentCol(null);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [fileToDelete, isDeletingFile]);
+  }, [fileToDelete, isDeletingFile, newCommentCol, pinnedCommentCol]);
 
   const [driveViewMode, setDriveViewMode] = useState(() => {
     return localStorage.getItem("dcr_drive_view_mode") || "photos";
@@ -866,6 +975,13 @@ export default function DCRReview({
         setPinnedCommentCol(null);
       }
       if (
+        newCommentCol &&
+        !e.target.closest(".cell-comment-popover") &&
+        !e.target.closest(".hover-comment-btn")
+      ) {
+        setNewCommentCol(null);
+      }
+      if (
         contractorDropdownRef.current &&
         !contractorDropdownRef.current.contains(e.target)
       ) {
@@ -874,7 +990,7 @@ export default function DCRReview({
     };
     document.addEventListener("mousedown", handleGlobalClick);
     return () => document.removeEventListener("mousedown", handleGlobalClick);
-  }, [pinnedCommentCol]);
+  }, [pinnedCommentCol, newCommentCol]);
 
   const toggleFieldExpand = (colLetter) => {
     setExpandedFields((prev) => ({
@@ -921,8 +1037,9 @@ export default function DCRReview({
     });
 
     const respSnapshot = {};
-    currentDirtyResp.forEach((colLetter) => {
-      respSnapshot[colLetter] = formResponseValuesRef.current[colLetter] ?? "";
+    currentDirtyResp.forEach((formRespColLetter) => {
+      respSnapshot[formRespColLetter] =
+        formResponseValuesRef.current[formRespColLetter] ?? "";
     });
 
     inFlightSnapshotRef.current = { mainSnapshot, respSnapshot };
@@ -941,8 +1058,8 @@ export default function DCRReview({
     if (currentDirtyResp.size > 0) {
       setFormResponseFieldStatuses((prev) => {
         const next = { ...prev };
-        currentDirtyResp.forEach((colLetter) => {
-          next[colLetter] = "saving";
+        currentDirtyResp.forEach((formRespColLetter) => {
+          next[formRespColLetter] = "saving";
         });
         return next;
       });
@@ -1026,15 +1143,14 @@ export default function DCRReview({
       }
 
       if (respSucceeded && Object.keys(respSnapshot).length > 0) {
-        if (onRecordUpdated && dcrData.fields) {
-          Object.entries(respSnapshot).forEach(([colLetter, val]) => {
-            if (colLetter !== "B" && colLetter !== "W") {
-              const fieldDef = dcrData.fields.find(
-                (f) => f.colLetter === colLetter,
-              );
-              if (fieldDef) {
-                onRecordUpdated(dcrData.sheetRowNumber, fieldDef.colIndex, val);
-              }
+        if (onRecordUpdated && dcrData.formResponseFields) {
+          Object.entries(respSnapshot).forEach(([formRespColLetter, val]) => {
+            const fieldDef = dcrData.formResponseFields.find(
+              (f) => f.formRespColLetter === formRespColLetter,
+            );
+            if (fieldDef) {
+              // fieldDef.colIndex is the corresponding index on 'Cable Replacement' (C..X)
+              onRecordUpdated(dcrData.sheetRowNumber, fieldDef.colIndex, val);
             }
           });
         }
@@ -1043,28 +1159,28 @@ export default function DCRReview({
           const nextDirty = new Set(prevDirty);
           const resolvedCols = [];
 
-          Object.keys(respSnapshot).forEach((colLetter) => {
+          Object.keys(respSnapshot).forEach((formRespColLetter) => {
             if (
-              formResponseValuesRef.current[colLetter] ===
-              respSnapshot[colLetter]
+              formResponseValuesRef.current[formRespColLetter] ===
+              respSnapshot[formRespColLetter]
             ) {
-              nextDirty.delete(colLetter);
-              resolvedCols.push(colLetter);
+              nextDirty.delete(formRespColLetter);
+              resolvedCols.push(formRespColLetter);
             }
           });
 
           setFormResponseFieldStatuses((prevStatuses) => {
             const nextStatuses = { ...prevStatuses };
-            resolvedCols.forEach((colLetter) => {
-              nextStatuses[colLetter] = "saved";
-              const timerKey = `resp_${colLetter}`;
+            resolvedCols.forEach((formRespColLetter) => {
+              nextStatuses[formRespColLetter] = "saved";
+              const timerKey = `resp_${formRespColLetter}`;
               if (fadeTimersRef.current[timerKey]) {
                 clearTimeout(fadeTimersRef.current[timerKey]);
               }
               fadeTimersRef.current[timerKey] = setTimeout(() => {
                 setFormResponseFieldStatuses((curr) =>
-                  curr[colLetter] === "saved"
-                    ? { ...curr, [colLetter]: "idle" }
+                  curr[formRespColLetter] === "saved"
+                    ? { ...curr, [formRespColLetter]: "idle" }
                     : curr,
                 );
               }, 2500);
@@ -1077,8 +1193,8 @@ export default function DCRReview({
       } else if (!respSucceeded && Object.keys(respSnapshot).length > 0) {
         setFormResponseFieldStatuses((prev) => {
           const next = { ...prev };
-          Object.keys(respSnapshot).forEach((colLetter) => {
-            next[colLetter] = "error";
+          Object.keys(respSnapshot).forEach((formRespColLetter) => {
+            next[formRespColLetter] = "error";
           });
           return next;
         });
@@ -1161,20 +1277,20 @@ export default function DCRReview({
     }, 3000);
   };
 
-  // Handler for 'DCR Form Responses' editable fields (Cols B..W)
-  const handleFormResponseChange = (colLetter, value) => {
+  // Handler for 'DCR Form Responses' editable fields (keyed by formRespColLetter B..W)
+  const handleFormResponseChange = (formRespColLetter, value) => {
     setFormResponseValues((prev) => ({
       ...prev,
-      [colLetter]: value,
+      [formRespColLetter]: value,
     }));
 
     setDirtyFormResponseFields((prev) => {
       const next = new Set(prev);
-      next.add(colLetter);
+      next.add(formRespColLetter);
       return next;
     });
 
-    const timerKey = `resp_${colLetter}`;
+    const timerKey = `resp_${formRespColLetter}`;
     if (fadeTimersRef.current[timerKey]) {
       clearTimeout(fadeTimersRef.current[timerKey]);
       delete fadeTimersRef.current[timerKey];
@@ -1182,7 +1298,7 @@ export default function DCRReview({
 
     setFormResponseFieldStatuses((prev) => ({
       ...prev,
-      [colLetter]: "dirty",
+      [formRespColLetter]: "dirty",
     }));
 
     setGlobalStatus("dirty");
@@ -1229,15 +1345,16 @@ export default function DCRReview({
     }
   };
 
-  const handleInitiateNewComment = (colLetter, colHeaderName) => {
-    setCommentsDrawerOpen(true);
-    setDraftTarget({ colLetter, colHeaderName });
-    const sidebar = document.getElementById("comments-sidebar");
-    if (sidebar) sidebar.scrollTo({ top: 0, behavior: "smooth" });
+  // Open cell-anchored new-comment popover regardless of sidebar visibility
+  const handleInitiateNewComment = (colLetter) => {
+    setPinnedCommentCol(null);
+    setHoveredCommentCol(null);
+    setNewCommentCol(colLetter);
   };
 
   const handleTriangleClick = (e, colLetter, activeComment) => {
     e.stopPropagation();
+    setNewCommentCol(null);
     if (commentsDrawerOpen) {
       const el = document.getElementById(
         `sidebar-comment-${activeComment.commentId}`,
@@ -1255,7 +1372,7 @@ export default function DCRReview({
   };
 
   const handleTriangleMouseEnter = (colLetter) => {
-    if (commentsDrawerOpen) return;
+    if (commentsDrawerOpen || newCommentCol) return;
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     setHoveredCommentCol(colLetter);
   };
@@ -1376,8 +1493,8 @@ export default function DCRReview({
   };
 
   // --- Comment API Actions ---
-  const handlePostNewThread = async (text) => {
-    if (!draftTarget) return;
+  const handlePostNewThread = async (colLetter, text) => {
+    if (!colLetter) return;
     try {
       const res = await fetch(`/api/dcr/${encodeURIComponent(dcrId)}/comment`, {
         method: "POST",
@@ -1386,7 +1503,7 @@ export default function DCRReview({
           Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
-          colLetter: draftTarget.colLetter,
+          colLetter,
           text,
           sheetRowNumber: dcrData?.sheetRowNumber,
           sheetId: dcrData?.sheetId,
@@ -1396,7 +1513,8 @@ export default function DCRReview({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
-      setDraftTarget(null);
+      setNewCommentCol(null);
+      setPinnedCommentCol(colLetter);
       showToast("Comment posted to Google Sheets", "success");
     } catch (err) {
       showToast(`Failed to post comment: ${err.message}`, "error");
@@ -1590,7 +1708,8 @@ export default function DCRReview({
 
       const initialFormRespInputs = {};
       (data.formResponseFields || []).forEach((f) => {
-        initialFormRespInputs[f.colLetter] = f.value;
+        const key = f.formRespColLetter || f.colLetter;
+        initialFormRespInputs[key] = f.value;
       });
       setFormResponseValues(initialFormRespInputs);
 
@@ -1980,6 +2099,7 @@ export default function DCRReview({
             >
               {managerSignOffs.map((f) => {
                 const activeComment = getActiveCommentForCol(f.colLetter);
+                const isNewCommentOpen = newCommentCol === f.colLetter;
                 return (
                   <div
                     key={f.colLetter}
@@ -2015,17 +2135,28 @@ export default function DCRReview({
                         onResolve={handleToggleResolve}
                       />
                     ) : (
-                      <button
-                        type="button"
-                        className="hover-comment-btn"
-                        title="Add comment"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleInitiateNewComment(f.colLetter, f.header);
-                        }}
-                      >
-                        💬+
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="hover-comment-btn"
+                          title="Add comment"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleInitiateNewComment(f.colLetter);
+                          }}
+                        >
+                          💬+
+                        </button>
+                        {isNewCommentOpen && (
+                          <NewCommentPopover
+                            colHeaderName={f.header}
+                            onSave={(text) =>
+                              handlePostNewThread(f.colLetter, text)
+                            }
+                            onClose={() => setNewCommentCol(null)}
+                          />
+                        )}
+                      </>
                     )}
                     <label
                       style={{
@@ -2058,7 +2189,7 @@ export default function DCRReview({
             </div>
           </div>
 
-          {/* Section 2: DCR Form Responses Data (Editable for Manager/Director, Locked for others) */}
+          {/* Section 2: DCR Form Data (Cols C through X & Y on Cable Replacement; writes back to DCR Form Responses) */}
           <div
             style={{
               background: "var(--bg-card)",
@@ -2087,8 +2218,8 @@ export default function DCRReview({
                 }}
               >
                 {dcrData.canEditFormResponses
-                  ? "DCR Form Responses (Cols B through W)"
-                  : "Locked DCR Form Data (Cols B through Y)"}
+                  ? "DCR Form Data (Cols C through X)"
+                  : "Locked DCR Form Data (Cols C through Y)"}
               </h3>
               {dcrData.canEditFormResponses && (
                 <span
@@ -2111,33 +2242,34 @@ export default function DCRReview({
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
                 gap: "12px",
-                alignItems: "stretch",
+                alignItems: dcrData.canEditFormResponses ? "start" : "stretch",
               }}
             >
               {formResponseFields.map((f) => {
-                const isExpanded = !!expandedFields[f.colLetter];
+                // f.colLetter = 'Cable Replacement' column ('C'..'X', 'Y') -> used for headers, IDs, and comments
+                // f.formRespColLetter = 'DCR Form Responses' column ('B'..'W', 'Y') -> used for values, dropdowns, and saving
+                const mainColLetter = f.colLetter;
+                const formRespColLetter = f.formRespColLetter || f.colLetter;
+                const isExpanded = !!expandedFields[mainColLetter];
                 const currentValue = f.isReadOnly
                   ? String(f.value || "")
-                  : (formResponseValues[f.colLetter] ?? "");
+                  : (formResponseValues[formRespColLetter] ?? "");
                 const isLong =
                   currentValue.length > 55 ||
                   currentValue.split("\n").length > 2;
 
-                // Map native comments on shared columns C..S (skip B and W so they don't collide with Cable Replacement B/W)
-                const supportsMainSheetComment =
-                  f.colIndex >= 2 && f.colIndex <= 18;
-                const activeComment = supportsMainSheetComment
-                  ? getActiveCommentForCol(f.colLetter)
-                  : null;
+                const activeComment = getActiveCommentForCol(mainColLetter);
+                const isNewCommentOpen = newCommentCol === mainColLetter;
 
-                // Dropdown options for E, H, I, J, Q, R
+                // Dropdown options keyed by 'DCR Form Responses' column letter (E, H, I, J, Q, R)
                 let dropdownOptions = null;
                 if (f.inputType === "select") {
                   const rawOptions =
-                    formResponseDropdowns[f.colLetter] &&
-                    formResponseDropdowns[f.colLetter].length > 0
-                      ? formResponseDropdowns[f.colLetter]
-                      : FORM_RESPONSE_DROPDOWN_FALLBACKS[f.colLetter] || [];
+                    formResponseDropdowns[formRespColLetter] &&
+                    formResponseDropdowns[formRespColLetter].length > 0
+                      ? formResponseDropdowns[formRespColLetter]
+                      : FORM_RESPONSE_DROPDOWN_FALLBACKS[formRespColLetter] ||
+                        [];
                   dropdownOptions = [...rawOptions];
                   if (currentValue && !dropdownOptions.includes(currentValue)) {
                     dropdownOptions.unshift(currentValue);
@@ -2146,12 +2278,8 @@ export default function DCRReview({
 
                 return (
                   <div
-                    key={`resp-${f.colLetter}`}
-                    id={
-                      supportsMainSheetComment
-                        ? `field-card-${f.colLetter}`
-                        : `field-card-resp-${f.colLetter}`
-                    }
+                    key={`resp-${mainColLetter}`}
+                    id={`field-card-${mainColLetter}`}
                     className="dcr-field-container"
                     style={{
                       background: "var(--bg-card-subtle)",
@@ -2161,46 +2289,56 @@ export default function DCRReview({
                       display: "flex",
                       flexDirection: "column",
                       justifyContent: "space-between",
-                      height: "100%",
+                      height: dcrData.canEditFormResponses ? "auto" : "100%",
                       boxSizing: "border-box",
                       transition:
                         "border-color 0.2s ease, box-shadow 0.2s ease",
                       position: "relative",
                     }}
                   >
-                    {supportsMainSheetComment &&
-                      (activeComment ? (
-                        <CellCommentMarker
-                          colLetter={f.colLetter}
-                          colHeaderName={f.header}
-                          comment={activeComment}
-                          commentsDrawerOpen={commentsDrawerOpen}
-                          isPinned={pinnedCommentCol === f.colLetter}
-                          isPreview={hoveredCommentCol === f.colLetter}
-                          onTriangleClick={(e) =>
-                            handleTriangleClick(e, f.colLetter, activeComment)
-                          }
-                          onMouseEnter={() =>
-                            handleTriangleMouseEnter(f.colLetter)
-                          }
-                          onMouseLeave={handleTriangleMouseLeave}
-                          onClose={() => setPinnedCommentCol(null)}
-                          onReply={handlePostReply}
-                          onResolve={handleToggleResolve}
-                        />
-                      ) : (
+                    {activeComment ? (
+                      <CellCommentMarker
+                        colLetter={mainColLetter}
+                        colHeaderName={f.header}
+                        comment={activeComment}
+                        commentsDrawerOpen={commentsDrawerOpen}
+                        isPinned={pinnedCommentCol === mainColLetter}
+                        isPreview={hoveredCommentCol === mainColLetter}
+                        onTriangleClick={(e) =>
+                          handleTriangleClick(e, mainColLetter, activeComment)
+                        }
+                        onMouseEnter={() =>
+                          handleTriangleMouseEnter(mainColLetter)
+                        }
+                        onMouseLeave={handleTriangleMouseLeave}
+                        onClose={() => setPinnedCommentCol(null)}
+                        onReply={handlePostReply}
+                        onResolve={handleToggleResolve}
+                      />
+                    ) : (
+                      <>
                         <button
                           type="button"
                           className="hover-comment-btn"
                           title="Add comment"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleInitiateNewComment(f.colLetter, f.header);
+                            handleInitiateNewComment(mainColLetter);
                           }}
                         >
                           💬+
                         </button>
-                      ))}
+                        {isNewCommentOpen && (
+                          <NewCommentPopover
+                            colHeaderName={f.header}
+                            onSave={(text) =>
+                              handlePostNewThread(mainColLetter, text)
+                            }
+                            onClose={() => setNewCommentCol(null)}
+                          />
+                        )}
+                      </>
+                    )}
 
                     <div
                       className="spec-header-clamped"
@@ -2214,7 +2352,7 @@ export default function DCRReview({
                         alignItems: "flex-start",
                         gap: "4px",
                       }}
-                      title={`${f.header} (${f.colLetter})`}
+                      title={`${f.header} (${mainColLetter})`}
                     >
                       <span
                         style={{
@@ -2224,11 +2362,11 @@ export default function DCRReview({
                           overflow: "hidden",
                         }}
                       >
-                        {f.header} ({f.colLetter})
+                        {f.header} ({mainColLetter})
                       </span>
                       {!f.isReadOnly && (
                         <FieldIndicator
-                          status={formResponseFieldStatuses[f.colLetter]}
+                          status={formResponseFieldStatuses[formRespColLetter]}
                         />
                       )}
                     </div>
@@ -2261,7 +2399,7 @@ export default function DCRReview({
                             </div>
                             <button
                               type="button"
-                              onClick={() => toggleFieldExpand(f.colLetter)}
+                              onClick={() => toggleFieldExpand(mainColLetter)}
                               className="spec-expand-btn"
                               style={{
                                 position: "absolute",
@@ -2291,14 +2429,23 @@ export default function DCRReview({
                               {f.value || "—"}
                             </div>
                             {isLong && isExpanded && (
-                              <button
-                                type="button"
-                                onClick={() => toggleFieldExpand(f.colLetter)}
-                                className="spec-expand-btn"
-                                style={{ marginTop: "4px" }}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "flex-end",
+                                  marginTop: "4px",
+                                }}
                               >
-                                Less ▲
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleFieldExpand(mainColLetter)
+                                  }
+                                  className="spec-expand-btn"
+                                >
+                                  Less ▲
+                                </button>
+                              </div>
                             )}
                           </div>
                         )
@@ -2308,7 +2455,7 @@ export default function DCRReview({
                           value={currentValue}
                           onChange={(e) =>
                             handleFormResponseChange(
-                              f.colLetter,
+                              formRespColLetter,
                               e.target.value,
                             )
                           }
@@ -2337,7 +2484,7 @@ export default function DCRReview({
                           placeholder={f.placeholder || ""}
                           onChange={(e) =>
                             handleFormResponseChange(
-                              f.colLetter,
+                              formRespColLetter,
                               e.target.value,
                             )
                           }
@@ -2355,11 +2502,9 @@ export default function DCRReview({
                         <AutoResizeTextarea
                           value={currentValue}
                           placeholder={f.placeholder || ""}
-                          isExpanded={isExpanded}
-                          onToggleExpand={() => toggleFieldExpand(f.colLetter)}
                           onChange={(e) =>
                             handleFormResponseChange(
-                              f.colLetter,
+                              formRespColLetter,
                               e.target.value,
                             )
                           }
@@ -2956,6 +3101,7 @@ export default function DCRReview({
                 {postSpecsFields.map((f) => {
                   const currentValue = formValues[f.colLetter] ?? "";
                   const activeComment = getActiveCommentForCol(f.colLetter);
+                  const isNewCommentOpen = newCommentCol === f.colLetter;
 
                   if (f.colLetter === "AI") {
                     const contractorOptions =
@@ -3005,17 +3151,28 @@ export default function DCRReview({
                             onResolve={handleToggleResolve}
                           />
                         ) : (
-                          <button
-                            type="button"
-                            className="hover-comment-btn"
-                            title="Add comment"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleInitiateNewComment(f.colLetter, f.header);
-                            }}
-                          >
-                            💬+
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="hover-comment-btn"
+                              title="Add comment"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleInitiateNewComment(f.colLetter);
+                              }}
+                            >
+                              💬+
+                            </button>
+                            {isNewCommentOpen && (
+                              <NewCommentPopover
+                                colHeaderName={f.header}
+                                onSave={(text) =>
+                                  handlePostNewThread(f.colLetter, text)
+                                }
+                                onClose={() => setNewCommentCol(null)}
+                              />
+                            )}
+                          </>
                         )}
                         <label
                           style={{
@@ -3162,17 +3319,28 @@ export default function DCRReview({
                           onResolve={handleToggleResolve}
                         />
                       ) : (
-                        <button
-                          type="button"
-                          className="hover-comment-btn"
-                          title="Add comment"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleInitiateNewComment(f.colLetter, f.header);
-                          }}
-                        >
-                          💬+
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="hover-comment-btn"
+                            title="Add comment"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInitiateNewComment(f.colLetter);
+                            }}
+                          >
+                            💬+
+                          </button>
+                          {isNewCommentOpen && (
+                            <NewCommentPopover
+                              colHeaderName={f.header}
+                              onSave={(text) =>
+                                handlePostNewThread(f.colLetter, text)
+                              }
+                              onClose={() => setNewCommentCol(null)}
+                            />
+                          )}
+                        </>
                       )}
                       <label
                         style={{
@@ -3265,20 +3433,28 @@ export default function DCRReview({
                   onResolve={handleToggleResolve}
                 />
               ) : (
-                <button
-                  type="button"
-                  className="hover-comment-btn"
-                  title="Add comment"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleInitiateNewComment(
-                      commentsField.colLetter,
-                      commentsField.header || "Comments",
-                    );
-                  }}
-                >
-                  💬+
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="hover-comment-btn"
+                    title="Add comment"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInitiateNewComment(commentsField.colLetter);
+                    }}
+                  >
+                    💬+
+                  </button>
+                  {newCommentCol === commentsField.colLetter && (
+                    <NewCommentPopover
+                      colHeaderName={commentsField.header || "Comments"}
+                      onSave={(text) =>
+                        handlePostNewThread(commentsField.colLetter, text)
+                      }
+                      onClose={() => setNewCommentCol(null)}
+                    />
+                  )}
+                </>
               )}
               <div
                 style={{
@@ -3398,10 +3574,7 @@ export default function DCRReview({
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setCommentsDrawerOpen(false);
-                  setDraftTarget(null);
-                }}
+                onClick={() => setCommentsDrawerOpen(false)}
                 style={{
                   background: "none",
                   border: "none",
@@ -3415,36 +3588,7 @@ export default function DCRReview({
               </button>
             </div>
 
-            {draftTarget && (
-              <div
-                style={{
-                  background: "var(--bg-card-subtle)",
-                  padding: "12px",
-                  borderRadius: "6px",
-                  border: "1px solid var(--btn-primary-bg)",
-                  marginBottom: "16px",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "var(--btn-primary-bg)",
-                    marginBottom: "4px",
-                  }}
-                >
-                  New comment on {draftTarget.colHeaderName}
-                </div>
-                <InlineCommentComposer
-                  placeholder="Type a new comment..."
-                  buttonText="Post"
-                  onSave={handlePostNewThread}
-                  onCancel={() => setDraftTarget(null)}
-                />
-              </div>
-            )}
-
-            {visibleComments.length === 0 && !draftTarget ? (
+            {visibleComments.length === 0 ? (
               <div
                 style={{
                   padding: "24px 8px",

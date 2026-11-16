@@ -1,12 +1,12 @@
-import express from "express";
-import cors from "cors";
-import { google } from "googleapis";
-import dotenv from "dotenv";
-import NodeCache from "node-cache";
-import path from "path";
-import { fileURLToPath } from "url";
-import multer from "multer";
-import { Readable } from "stream";
+import express from 'express';
+import cors from 'cors';
+import { google } from 'googleapis';
+import dotenv from 'dotenv';
+import NodeCache from 'node-cache';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
+import { Readable } from 'stream';
 
 dotenv.config();
 
@@ -26,11 +26,11 @@ const pendingRequests = new Map();
 app.use(cors());
 app.use(express.json());
 
-const MASTER_SPREADSHEET_ID = "1TrsDRv-aoCxPLzCp0ma6JlwamJPT13JuKuIda-5Uvdg";
-const DATA_VAL_TAB = "Data Val (Cable Replacement)";
-const FORM_RESPONSES_TAB = "DCR Form Responses";
-const FORM_RESPONSES_DATA_VAL_TAB = "Data Val (DCR Responses)";
-const MAIN_TAB = "Cable Replacement";
+const MASTER_SPREADSHEET_ID = '1TrsDRv-aoCxPLzCp0ma6JlwamJPT13JuKuIda-5Uvdg';
+const DATA_VAL_TAB = 'Data Val (Cable Replacement)';
+const FORM_RESPONSES_TAB = 'DCR Form Responses';
+const FORM_RESPONSES_DATA_VAL_TAB = 'Data Val (DCR Responses)';
+const MAIN_TAB = 'Cable Replacement';
 
 const googleRetryConfig = {
   retry: 4,
@@ -48,46 +48,46 @@ const googleRetryConfig = {
     const status = err.response?.status || err.code;
     const attempt = err.config?.currentRetryAttempt || 1;
     console.warn(
-      `[GOOGLE API RETRY] HTTP ${status} on ${err.config?.url}. Retrying attempt #${attempt}...`,
+      `[GOOGLE API RETRY] HTTP ${status} on ${err.config?.url}. Retrying attempt #${attempt}...`
     );
   },
 };
 
 const getSheetsClient = (authHeader) => {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing or malformed Authorization header');
   }
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: token });
 
   return google.sheets({
-    version: "v4",
+    version: 'v4',
     auth: oauth2Client,
     retryConfig: googleRetryConfig,
   });
 };
 
 const getDriveClient = (authHeader) => {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing or malformed Authorization header');
   }
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: token });
 
   return google.drive({
-    version: "v3",
+    version: 'v3',
     auth: oauth2Client,
     retryConfig: googleRetryConfig,
   });
 };
 
 async function getUserEmailFromAuth(authHeader) {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new Error('Missing or malformed Authorization header');
   }
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(' ')[1];
   const cacheKey = `user_email_${token.substring(0, 24)}`;
 
   if (cache.has(cacheKey)) {
@@ -97,12 +97,10 @@ async function getUserEmailFromAuth(authHeader) {
   const oauth2Client = new google.auth.OAuth2();
   oauth2Client.setCredentials({ access_token: token });
   const tokenInfo = await oauth2Client.getTokenInfo(token);
-  const email = (tokenInfo.email || "").toLowerCase().trim();
+  const email = (tokenInfo.email || '').toLowerCase().trim();
 
   if (!email) {
-    throw new Error(
-      "Unable to extract verified email from Google authorization token.",
-    );
+    throw new Error('Unable to extract verified email from Google authorization token.');
   }
 
   cache.set(cacheKey, email, 600);
@@ -110,7 +108,7 @@ async function getUserEmailFromAuth(authHeader) {
 }
 
 async function getMasterConfig(sheets, forceRefresh = false) {
-  const cacheKey = "master_config_bundle";
+  const cacheKey = 'master_config_bundle';
 
   if (forceRefresh) {
     cache.del(cacheKey);
@@ -120,7 +118,7 @@ async function getMasterConfig(sheets, forceRefresh = false) {
     return cache.get(cacheKey);
   }
 
-  console.log("[MASTER CONFIG] Batch-fetching RegionConfig and UserConfig...");
+  console.log('[MASTER CONFIG] Batch-fetching RegionConfig and UserConfig...');
   const response = await sheets.spreadsheets.values.batchGet({
     spreadsheetId: MASTER_SPREADSHEET_ID,
     ranges: ["'RegionConfig'!A1:Z", "'UserConfig'!A1:Z"],
@@ -130,63 +128,41 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   const regionRows = valueRanges[0]?.values || [];
   const userRows = valueRanges[1]?.values || [];
 
-  const regHeaders = (regionRows[0] || []).map((h) =>
-    String(h || "")
-      .trim()
-      .toLowerCase(),
-  );
+  const regHeaders = (regionRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
   let idCol = regHeaders.findIndex(
-    (h) =>
-      h === "region id" ||
-      (h.includes("id") && !h.includes("sheet") && !h.includes("folder")),
+    (h) => h === 'region id' || (h.includes('id') && !h.includes('sheet') && !h.includes('folder'))
   );
   if (idCol === -1) idCol = 0;
-  let nameCol = regHeaders.findIndex((h) => h.includes("name"));
+  let nameCol = regHeaders.findIndex((h) => h.includes('name'));
   if (nameCol === -1) nameCol = 1;
-  let sheetIdCol = regHeaders.findIndex((h) => h.includes("sheet"));
+  let sheetIdCol = regHeaders.findIndex((h) => h.includes('sheet'));
   if (sheetIdCol === -1) sheetIdCol = 2;
-  let folderIdCol = regHeaders.findIndex((h) => h.includes("folder"));
+  let folderIdCol = regHeaders.findIndex((h) => h.includes('folder'));
   if (folderIdCol === -1) folderIdCol = 3;
 
   const regions = [];
   if (regionRows.length > 1) {
     for (let r = 1; r < regionRows.length; r++) {
       const row = regionRows[r];
-      const id = String(row[idCol] || "")
-        .trim()
-        .toLowerCase();
-      const name = String(row[nameCol] || "").trim();
-      const spreadsheetId = String(row[sheetIdCol] || "").trim();
-      const folderId =
-        folderIdCol !== -1 ? String(row[folderIdCol] || "").trim() : "";
+      const id = String(row[idCol] || '').trim().toLowerCase();
+      const name = String(row[nameCol] || '').trim();
+      const spreadsheetId = String(row[sheetIdCol] || '').trim();
+      const folderId = folderIdCol !== -1 ? String(row[folderIdCol] || '').trim() : '';
 
-      if (
-        id &&
-        spreadsheetId &&
-        id !== "master" &&
-        spreadsheetId !== MASTER_SPREADSHEET_ID
-      ) {
+      if (id && spreadsheetId && id !== 'master' && spreadsheetId !== MASTER_SPREADSHEET_ID) {
         regions.push({ id, name: name || id, spreadsheetId, folderId });
       }
     }
   }
 
-  const userHeaders = (userRows[0] || []).map((h) =>
-    String(h || "")
-      .trim()
-      .toLowerCase(),
-  );
-  let emailCol = userHeaders.findIndex((h) => h.includes("email"));
-  let roleCol = userHeaders.findIndex(
-    (h) => h.includes("role") || h.includes("title"),
-  );
-  let regionCol = userHeaders.findIndex((h) => h.includes("region"));
+  const userHeaders = (userRows[0] || []).map((h) => String(h || '').trim().toLowerCase());
+  let emailCol = userHeaders.findIndex((h) => h.includes('email'));
+  let roleCol = userHeaders.findIndex((h) => h.includes('role') || h.includes('title'));
+  let regionCol = userHeaders.findIndex((h) => h.includes('region'));
 
   if (emailCol === -1) {
     if (userRows.length > 1) {
-      emailCol = userRows[1].findIndex((val) =>
-        String(val || "").includes("@"),
-      );
+      emailCol = userRows[1].findIndex((val) => String(val || '').includes('@'));
     }
     if (emailCol === -1) emailCol = 2;
   }
@@ -197,13 +173,11 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   if (userRows.length > 1) {
     for (let r = 1; r < userRows.length; r++) {
       const row = userRows[r];
-      const email = String(row[emailCol] || "")
-        .trim()
-        .toLowerCase();
-      const role = String(row[roleCol] || "").trim();
-      const allowedRegions = String(row[regionCol] || "").trim();
+      const email = String(row[emailCol] || '').trim().toLowerCase();
+      const role = String(row[roleCol] || '').trim();
+      const allowedRegions = String(row[regionCol] || '').trim();
       if (email) {
-        users.push({ email, role: role || "User", regions: allowedRegions });
+        users.push({ email, role: role || 'User', regions: allowedRegions });
       }
     }
   }
@@ -219,27 +193,23 @@ async function resolveRegionSpreadsheet(req, sheets) {
 
   const userProfile = users.find((u) => u.email === userEmail);
   if (!userProfile) {
-    const error = new Error(
-      `Account "${userEmail}" is not authorized in UserConfig.`,
-    );
+    const error = new Error(`Account "${userEmail}" is not authorized in UserConfig.`);
     error.statusCode = 403;
     throw error;
   }
 
   let userAllowedRegions = [];
-  const regionConfigString = (userProfile.regions || "").toUpperCase();
-  const roleString = (userProfile.role || "").toUpperCase();
+  const regionConfigString = (userProfile.regions || '').toUpperCase();
+  const roleString = (userProfile.role || '').toUpperCase();
 
-  if (regionConfigString === "ALL" || roleString === "DIRECTOR") {
+  if (regionConfigString === 'ALL' || roleString === 'DIRECTOR') {
     userAllowedRegions = regions;
   } else {
-    const allowedKeys = (userProfile.regions || "")
-      .split(",")
+    const allowedKeys = (userProfile.regions || '')
+      .split(',')
       .map((k) => k.trim().toLowerCase());
     userAllowedRegions = regions.filter(
-      (r) =>
-        allowedKeys.includes(r.id.toLowerCase()) ||
-        allowedKeys.includes(r.name.toLowerCase()),
+      (r) => allowedKeys.includes(r.id.toLowerCase()) || allowedKeys.includes(r.name.toLowerCase())
     );
   }
 
@@ -249,25 +219,19 @@ async function resolveRegionSpreadsheet(req, sheets) {
     throw error;
   }
 
-  const requestedId = (req.query.region || req.body.region || "")
-    .trim()
-    .toLowerCase();
+  const requestedId = (req.query.region || req.body.region || '').trim().toLowerCase();
 
   let targetRegion = null;
   if (!requestedId) {
     targetRegion = userAllowedRegions[0];
   } else {
     targetRegion = userAllowedRegions.find(
-      (r) =>
-        r.id.toLowerCase() === requestedId ||
-        r.name.toLowerCase() === requestedId,
+      (r) => r.id.toLowerCase() === requestedId || r.name.toLowerCase() === requestedId
     );
   }
 
   if (!targetRegion) {
-    const error = new Error(
-      `You do not have access permissions for region "${requestedId}".`,
-    );
+    const error = new Error(`You do not have access permissions for region "${requestedId}".`);
     error.statusCode = 403;
     throw error;
   }
@@ -281,7 +245,7 @@ async function resolveRegionSpreadsheet(req, sheets) {
 }
 
 function getColLetter(index) {
-  let letter = "";
+  let letter = '';
   let temp = index;
   while (temp >= 0) {
     letter = String.fromCharCode((temp % 26) + 65) + letter;
@@ -291,9 +255,7 @@ function getColLetter(index) {
 }
 
 function colLetterToIndex(colLetter) {
-  const cleanCol = String(colLetter || "")
-    .trim()
-    .toUpperCase();
+  const cleanCol = String(colLetter || '').trim().toUpperCase();
   let colIndex = 0;
   for (let i = 0; i < cleanCol.length; i++) {
     colIndex = colIndex * 26 + (cleanCol.charCodeAt(i) - 64);
@@ -305,8 +267,8 @@ function parseValidationRows(valRows, defaultKeys = {}) {
   const optionsMap = { ...defaultKeys };
 
   const formLinks = {
-    evalFormUrl: "",
-    qcFormUrl: "",
+    evalFormUrl: '',
+    qcFormUrl: '',
   };
 
   if (!valRows || valRows.length === 0) {
@@ -316,28 +278,20 @@ function parseValidationRows(valRows, defaultKeys = {}) {
   const headers = valRows[0] || [];
   const colLetterMapping = {};
 
-  let evalColIndex = headers.findIndex((h) =>
-    String(h || "")
-      .toLowerCase()
-      .includes("eval"),
-  );
+  let evalColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('eval'));
   if (evalColIndex === -1) evalColIndex = 5;
 
-  let qcColIndex = headers.findIndex((h) =>
-    String(h || "")
-      .toLowerCase()
-      .includes("qc"),
-  );
+  let qcColIndex = headers.findIndex((h) => String(h || '').toLowerCase().includes('qc'));
   if (qcColIndex === -1) qcColIndex = 6;
 
   if (valRows.length > 1) {
     const row2 = valRows[1] || [];
-    formLinks.evalFormUrl = String(row2[evalColIndex] || "").trim();
-    formLinks.qcFormUrl = String(row2[qcColIndex] || "").trim();
+    formLinks.evalFormUrl = String(row2[evalColIndex] || '').trim();
+    formLinks.qcFormUrl = String(row2[qcColIndex] || '').trim();
   }
 
   headers.forEach((header, colIdx) => {
-    const matches = [...String(header || "").matchAll(/\(([A-Z]+)\)/gi)];
+    const matches = [...String(header || '').matchAll(/\(([A-Z]+)\)/gi)];
     if (matches.length > 0) {
       const colLetter = matches[matches.length - 1][1].toUpperCase();
       colLetterMapping[colIdx] = colLetter;
@@ -350,7 +304,7 @@ function parseValidationRows(valRows, defaultKeys = {}) {
   for (let r = 1; r < valRows.length; r++) {
     const row = valRows[r];
     Object.entries(colLetterMapping).forEach(([colIdx, colLetter]) => {
-      const val = row[colIdx] ? String(row[colIdx]).trim() : "";
+      const val = row[colIdx] ? String(row[colIdx]).trim() : '';
       if (val && !optionsMap[colLetter].includes(val)) {
         optionsMap[colLetter].push(val);
       }
@@ -360,13 +314,7 @@ function parseValidationRows(valRows, defaultKeys = {}) {
   return { dropdownOptions: optionsMap, formLinks };
 }
 
-async function getOrFetchSheetWithValidation(
-  sheets,
-  spreadsheetId,
-  regionId,
-  tabName,
-  forceRefresh = false,
-) {
+async function getOrFetchSheetWithValidation(sheets, spreadsheetId, regionId, tabName, forceRefresh = false) {
   const cacheKey = `sheet_bundle_${regionId}_${tabName}`;
 
   if (forceRefresh) {
@@ -409,15 +357,17 @@ async function getOrFetchSheetWithValidation(
         AL: [],
       });
 
-      const { dropdownOptions: formResponseDropdownOptions } =
-        parseValidationRows(formResponseValRows, {
+      const { dropdownOptions: formResponseDropdownOptions } = parseValidationRows(
+        formResponseValRows,
+        {
           E: [],
           H: [],
           I: [],
           J: [],
           Q: [],
           R: [],
-        });
+        }
+      );
 
       const bundle = {
         values,
@@ -439,13 +389,7 @@ async function getOrFetchSheetWithValidation(
 }
 
 // Fetch native cell comments from Google Sheets for the active DCR row and construct deep links
-async function getNativeCellComments(
-  token,
-  spreadsheetId,
-  sheetTitle,
-  targetRowIndex,
-  sheetRowNumber,
-) {
+async function getNativeCellComments(token, spreadsheetId, sheetTitle, targetRowIndex, sheetRowNumber) {
   const comments = [];
   let targetSheetId = 0;
 
@@ -456,17 +400,13 @@ async function getNativeCellComments(
     });
 
     if (!sheetsRes.ok) {
-      console.warn(
-        "[COMMENTS] Sheets API returned error:",
-        sheetsRes.status,
-        sheetsRes.statusText,
-      );
+      console.warn('[COMMENTS] Sheets API returned error:', sheetsRes.status, sheetsRes.statusText);
       return { comments: [], sheetId: 0 };
     }
 
     const sData = await sheetsRes.json();
     const targetSheet = (sData.sheets || []).find(
-      (s) => s.properties?.title === sheetTitle,
+      (s) => s.properties?.title === sheetTitle
     );
 
     targetSheetId = targetSheet?.properties?.sheetId ?? 0;
@@ -475,69 +415,55 @@ async function getNativeCellComments(
 
     const rowAnchors = anchors.filter((a) => {
       const r = a.range || a.gridRange;
-      return (
-        r &&
-        r.startRowIndex !== undefined &&
-        Number(r.startRowIndex) === Number(targetRowIndex)
-      );
+      return r && r.startRowIndex !== undefined && Number(r.startRowIndex) === Number(targetRowIndex);
     });
 
     rowAnchors.forEach((anchor) => {
       const r = anchor.range || anchor.gridRange;
-      const colIdx =
-        r && r.startColumnIndex !== undefined ? Number(r.startColumnIndex) : 0;
+      const colIdx = r && r.startColumnIndex !== undefined ? Number(r.startColumnIndex) : 0;
       const colLetter = getColLetter(colIdx);
       const cellCoordinate = `${colLetter}${sheetRowNumber}`;
       const openInSheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit#gid=${targetSheetId}&range=${cellCoordinate}`;
 
       const thread = allThreads.find(
         (t) =>
-          (t.anchorId &&
-            anchor.anchorId &&
-            String(t.anchorId) === String(anchor.anchorId)) ||
-          (t.commentId &&
-            anchor.commentId &&
-            String(t.commentId) === String(anchor.commentId)),
+          (t.anchorId && anchor.anchorId && String(t.anchorId) === String(anchor.anchorId)) ||
+          (t.commentId && anchor.commentId && String(t.commentId) === String(anchor.commentId))
       );
 
       if (thread) {
-        const headPost =
-          thread.headPost || (thread.posts && thread.posts[0]) || {};
-        const rawReplies =
-          thread.replies || (thread.posts && thread.posts.slice(1)) || [];
+        const headPost = thread.headPost || (thread.posts && thread.posts[0]) || {};
+        const rawReplies = thread.replies || (thread.posts && thread.posts.slice(1)) || [];
 
         const validReplies = rawReplies
-          .filter(
-            (rep) =>
-              rep && rep.content && String(rep.content).trim().length > 0,
-          )
+          .filter((rep) => rep && rep.content && String(rep.content).trim().length > 0)
           .map((rep, rIdx) => ({
             replyId: rep.postId || rep.id || `rep_${rIdx}`,
-            text: rep.content || "",
+            text: rep.content || '',
             authorName:
               rep.author?.displayName ||
-              (rep.author?.emailAddress || "").split("@")[0] ||
-              "User",
-            authorEmail: rep.author?.emailAddress || "",
-            timestamp: rep.createTime || "",
+              (rep.author?.emailAddress || '').split('@')[0] ||
+              'User',
+            authorEmail: rep.author?.emailAddress || '',
+            timestamp: rep.createTime || '',
           }));
 
         const isResolved =
-          String(thread.status || "").toUpperCase() === "RESOLVED" ||
+          String(thread.status || '').toUpperCase() === 'RESOLVED' ||
           thread.resolved === true;
 
         comments.push({
           commentId: thread.commentId,
           colLetter,
           cellCoordinate,
-          plainTextQuote: thread.plainTextQuote || "",
-          text: headPost.content || "",
+          plainTextQuote: thread.plainTextQuote || '',
+          text: headPost.content || '',
           authorName:
             headPost.author?.displayName ||
-            (headPost.author?.emailAddress || "").split("@")[0] ||
-            "User",
-          authorEmail: headPost.author?.emailAddress || "",
-          timestamp: headPost.createTime || "",
+            (headPost.author?.emailAddress || '').split('@')[0] ||
+            'User',
+          authorEmail: headPost.author?.emailAddress || '',
+          timestamp: headPost.createTime || '',
           resolved: isResolved,
           openInSheetUrl,
           replies: validReplies,
@@ -548,21 +474,18 @@ async function getNativeCellComments(
     comments.sort((a, b) => {
       const timeA = Math.max(
         new Date(a.timestamp || 0).getTime(),
-        ...a.replies.map((r) => new Date(r.timestamp || 0).getTime()),
+        ...a.replies.map((r) => new Date(r.timestamp || 0).getTime())
       );
       const timeB = Math.max(
         new Date(b.timestamp || 0).getTime(),
-        ...b.replies.map((r) => new Date(r.timestamp || 0).getTime()),
+        ...b.replies.map((r) => new Date(r.timestamp || 0).getTime())
       );
       return timeB - timeA;
     });
 
     return { comments, sheetId: targetSheetId };
   } catch (err) {
-    console.warn(
-      "[COMMENTS] Error querying native cell comments:",
-      err.message,
-    );
+    console.warn('[COMMENTS] Error querying native cell comments:', err.message);
     return { comments: [], sheetId: targetSheetId };
   }
 }
@@ -571,7 +494,7 @@ async function getNativeCellComments(
 // Authentication & Region Discovery Endpoint
 // ---------------------------------------------------------------------------
 
-app.get("/api/auth/me", async (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   try {
     const sheets = getSheetsClient(req.headers.authorization);
     const userEmail = await getUserEmailFromAuth(req.headers.authorization);
@@ -585,19 +508,17 @@ app.get("/api/auth/me", async (req, res) => {
     }
 
     let allowedRegions = [];
-    const regionString = (userProfile.regions || "").toUpperCase();
-    const roleString = (userProfile.role || "").toUpperCase();
+    const regionString = (userProfile.regions || '').toUpperCase();
+    const roleString = (userProfile.role || '').toUpperCase();
 
-    if (regionString === "ALL" || roleString === "DIRECTOR") {
+    if (regionString === 'ALL' || roleString === 'DIRECTOR') {
       allowedRegions = regions;
     } else {
-      const allowedKeys = (userProfile.regions || "")
-        .split(",")
+      const allowedKeys = (userProfile.regions || '')
+        .split(',')
         .map((k) => k.trim().toLowerCase());
       allowedRegions = regions.filter(
-        (r) =>
-          allowedKeys.includes(r.id.toLowerCase()) ||
-          allowedKeys.includes(r.name.toLowerCase()),
+        (r) => allowedKeys.includes(r.id.toLowerCase()) || allowedKeys.includes(r.name.toLowerCase())
       );
     }
 
@@ -613,10 +534,7 @@ app.get("/api/auth/me", async (req, res) => {
       allowedRegions: allowedRegions.map((r) => ({ id: r.id, name: r.name })),
     });
   } catch (error) {
-    console.error(
-      "Error in /api/auth/me:",
-      error?.response?.data || error.message,
-    );
+    console.error('Error in /api/auth/me:', error?.response?.data || error.message);
     const status = error.statusCode || error?.response?.status || 500;
     res.status(status).json({
       error: error?.response?.data?.error?.message || error.message,
@@ -628,32 +546,25 @@ app.get("/api/auth/me", async (req, res) => {
 // Sheet Endpoints
 // ---------------------------------------------------------------------------
 
-app.get("/api/sheet", async (req, res) => {
+app.get('/api/sheet', async (req, res) => {
   try {
     const tabName = req.query.tab || MAIN_TAB;
-    const forceRefresh = req.query.refresh === "true";
+    const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
 
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
-    const { values, dropdownOptions, formLinks } =
-      await getOrFetchSheetWithValidation(
-        sheets,
-        spreadsheetId,
-        targetRegion.id,
-        tabName,
-        forceRefresh,
-      );
+    const { values, dropdownOptions, formLinks } = await getOrFetchSheetWithValidation(
+      sheets,
+      spreadsheetId,
+      targetRegion.id,
+      tabName,
+      forceRefresh
+    );
 
     res.json({ values, dropdownOptions, formLinks, region: targetRegion });
   } catch (error) {
-    console.error(
-      "Error fetching sheet:",
-      error?.response?.data || error.message,
-    );
+    console.error('Error fetching sheet:', error?.response?.data || error.message);
     const status = error.statusCode || error?.response?.status || 500;
     res.status(status).json({
       error: error?.response?.data?.error?.message || error.message,
@@ -661,36 +572,28 @@ app.get("/api/sheet", async (req, res) => {
   }
 });
 
-app.post("/api/sheet/cell", async (req, res) => {
+app.post('/api/sheet/cell', async (req, res) => {
   try {
     const sheets = getSheetsClient(req.headers.authorization);
     const { tabName = MAIN_TAB, cell, value } = req.body;
 
     if (!cell) {
-      return res
-        .status(400)
-        .json({ error: "Missing cell coordinate (e.g. B2)" });
+      return res.status(400).json({ error: 'Missing cell coordinate (e.g. B2)' });
     }
 
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     const response = await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `'${tabName}'!${cell}`,
-      valueInputOption: "USER_ENTERED",
+      valueInputOption: 'USER_ENTERED',
       requestBody: { values: [[value]] },
     });
 
     cache.del(`sheet_bundle_${targetRegion.id}_${tabName}`);
     res.json({ success: true, updatedRange: response.data.updatedRange });
   } catch (error) {
-    console.error(
-      "Error updating cell:",
-      error?.response?.data || error.message,
-    );
+    console.error('Error updating cell:', error?.response?.data || error.message);
     const status = error.statusCode || error?.response?.status || 500;
     res.status(status).json({
       error: error?.response?.data?.error?.message || error.message,
@@ -702,26 +605,20 @@ app.post("/api/sheet/cell", async (req, res) => {
 // Dedicated DCR & Comment Operations (Sheets API batchUpdate)
 // ---------------------------------------------------------------------------
 
-const FORM_RESPONSE_DROPDOWN_COLS = new Set(["E", "H", "I", "J", "Q", "R"]);
-const FORM_RESPONSE_HIDDEN_COLS = new Set([19, 20, 21]); // T, U, V
+const FORM_RESPONSE_DROPDOWN_COLS = new Set(['E', 'H', 'I', 'J', 'Q', 'R']);
+const FORM_RESPONSE_HIDDEN_COLS = new Set([19, 20, 21]); // T, U, V on DCR Form Responses
 
-app.get("/api/dcr/:dcrId", async (req, res) => {
+app.get('/api/dcr/:dcrId', async (req, res) => {
   try {
     const { dcrId } = req.params;
-    const forceRefresh = req.query.refresh === "true";
+    const forceRefresh = req.query.refresh === 'true';
     const sheets = getSheetsClient(req.headers.authorization);
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
-    const { targetRegion, spreadsheetId, userProfile } =
-      await resolveRegionSpreadsheet(req, sheets);
+    const { targetRegion, spreadsheetId, userProfile } = await resolveRegionSpreadsheet(req, sheets);
 
-    const userRole = String(userProfile?.role || "")
-      .trim()
-      .toUpperCase();
-    const canEditFormResponses =
-      userRole === "DIRECTOR" || userRole === "MANAGER";
+    const userRole = String(userProfile?.role || '').trim().toUpperCase();
+    const canEditFormResponses = userRole === 'DIRECTOR' || userRole === 'MANAGER';
 
     const {
       values: rows,
@@ -734,13 +631,11 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       spreadsheetId,
       targetRegion.id,
       MAIN_TAB,
-      forceRefresh,
+      forceRefresh
     );
 
     if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ error: `Sheet for region ${targetRegion.name} is empty` });
+      return res.status(404).json({ error: `Sheet for region ${targetRegion.name} is empty` });
     }
 
     const headers = rows[0];
@@ -748,7 +643,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
 
     let foundIndex = -1;
     for (let i = 1; i < rows.length; i++) {
-      const cellVal = String(rows[i][DCR_COL_INDEX] || "").trim();
+      const cellVal = String(rows[i][DCR_COL_INDEX] || '').trim();
       if (cellVal.toLowerCase() === String(dcrId).trim().toLowerCase()) {
         foundIndex = i;
         break;
@@ -756,9 +651,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
     }
 
     if (foundIndex === -1) {
-      return res
-        .status(404)
-        .json({ error: `DCR ID "${dcrId}" not found in ${targetRegion.name}` });
+      return res.status(404).json({ error: `DCR ID "${dcrId}" not found in ${targetRegion.name}` });
     }
 
     const targetRow = rows[foundIndex];
@@ -768,7 +661,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
     let formRespFoundIndex = -1;
     if (formResponseRows && formResponseRows.length > 1) {
       for (let i = 1; i < formResponseRows.length; i++) {
-        const cellVal = String(formResponseRows[i][DCR_COL_INDEX] || "").trim();
+        const cellVal = String(formResponseRows[i][DCR_COL_INDEX] || '').trim();
         if (cellVal.toLowerCase() === String(dcrId).trim().toLowerCase()) {
           formRespFoundIndex = i;
           break;
@@ -776,62 +669,62 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       }
     }
 
-    const formRespHeaders =
-      (formResponseRows && formResponseRows[0]) || headers;
-    const formRespTargetRow =
-      formRespFoundIndex !== -1
-        ? formResponseRows[formRespFoundIndex]
-        : targetRow;
-    const formResponsesSheetRowNumber =
-      formRespFoundIndex !== -1 ? formRespFoundIndex + 1 : null;
+    const formRespHeaders = (formResponseRows && formResponseRows[0]) || headers;
+    const formRespTargetRow = formRespFoundIndex !== -1 ? formResponseRows[formRespFoundIndex] : targetRow;
+    const formResponsesSheetRowNumber = formRespFoundIndex !== -1 ? formRespFoundIndex + 1 : null;
 
     const { comments, sheetId: targetSheetId } = await getNativeCellComments(
       token,
       spreadsheetId,
       MAIN_TAB,
       foundIndex,
-      sheetRowNumber,
+      sheetRowNumber
     );
 
     const fields = headers.map((header, idx) => ({
       colIndex: idx,
       colLetter: getColLetter(idx),
       header: header || `Column ${getColLetter(idx)}`,
-      value: targetRow[idx] || "",
+      value: targetRow[idx] || '',
       isReadOnly: idx >= 2 && idx <= 24,
     }));
 
-    // Build 'DCR Form Responses' fields: Cols B (1) through W (22) excluding T, U, V (19, 20, 21), plus read-only Y (24)
+    // Map 'DCR Form Responses' (Cols B..W -> Cable Replacement Cols C..X, plus Y -> Y)
+    // Titles, column letters, and comments come from 'Cable Replacement' (mainIdx),
+    // while field values and write updates map to 'DCR Form Responses' (formIdx).
     const formResponseFields = [];
-    for (let idx = 1; idx <= 24; idx++) {
-      if (idx === 23) continue; // Exclude X
-      if (FORM_RESPONSE_HIDDEN_COLS.has(idx)) continue; // Exclude T (19), U (20), V (21)
+    for (let formIdx = 1; formIdx <= 24; formIdx++) {
+      if (formIdx === 23) continue; // Skip X on Form Responses (W -> X on Cable Replacement; Y -> Y)
+      if (FORM_RESPONSE_HIDDEN_COLS.has(formIdx)) continue; // Exclude T (19), U (20), V (21)
 
-      const colLetter = getColLetter(idx);
-      const isDcrIdCol = idx === 24; // Column Y is strictly read-only for everyone
-      const isEditable =
-        !isDcrIdCol && canEditFormResponses && formRespFoundIndex !== -1;
+      const isDcrIdCol = formIdx === 24; // Column Y is strictly read-only for everyone
+      const mainIdx = isDcrIdCol ? 24 : formIdx + 1;
+      const mainColLetter = getColLetter(mainIdx); // C..X, and Y on Cable Replacement
+      const formRespColLetter = getColLetter(formIdx); // B..W, and Y on DCR Form Responses
+      const isEditable = !isDcrIdCol && canEditFormResponses && formRespFoundIndex !== -1;
 
-      let inputType = "textarea";
-      let placeholder = "";
+      let inputType = 'textarea';
+      let placeholder = '';
 
-      if (colLetter === "B") {
-        inputType = "text";
-        placeholder = "m/d/yy";
-      } else if (colLetter === "D") {
-        inputType = "textarea";
-        placeholder = "First name, Last name";
-      } else if (FORM_RESPONSE_DROPDOWN_COLS.has(colLetter)) {
-        inputType = "select";
+      if (formRespColLetter === 'B') {
+        inputType = 'text';
+        placeholder = 'm/d/yy';
+      } else if (formRespColLetter === 'D') {
+        inputType = 'textarea';
+        placeholder = 'First name, Last name';
+      } else if (FORM_RESPONSE_DROPDOWN_COLS.has(formRespColLetter)) {
+        inputType = 'select';
       } else if (isDcrIdCol) {
-        inputType = "text";
+        inputType = 'text';
       }
 
       formResponseFields.push({
-        colIndex: idx,
-        colLetter,
-        header: formRespHeaders[idx] || headers[idx] || `Column ${colLetter}`,
-        value: formRespTargetRow[idx] || "",
+        colIndex: mainIdx,
+        colLetter: mainColLetter,
+        formRespColIndex: formIdx,
+        formRespColLetter,
+        header: headers[mainIdx] || formRespHeaders[formIdx] || `Column ${mainColLetter}`,
+        value: formRespTargetRow[formIdx] || '',
         isReadOnly: !isEditable,
         inputType,
         placeholder,
@@ -844,7 +737,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       formResponsesSheetRowNumber,
       sheetId: targetSheetId,
       canEditFormResponses,
-      userRole: userProfile?.role || "User",
+      userRole: userProfile?.role || 'User',
       fields,
       formResponseFields,
       dropdownOptions,
@@ -854,10 +747,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       comments,
     });
   } catch (error) {
-    console.error(
-      "Error fetching DCR details:",
-      error?.response?.data || error.message,
-    );
+    console.error('Error fetching DCR details:', error?.response?.data || error.message);
     const status = error.statusCode || error?.response?.status || 500;
     res.status(status).json({
       error: error?.response?.data?.error?.message || error.message,
@@ -865,27 +755,20 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
   }
 });
 
-app.post("/api/dcr/:dcrId/comment", async (req, res) => {
+app.post('/api/dcr/:dcrId/comment', async (req, res) => {
   try {
     const { dcrId } = req.params;
     const { colLetter, text, sheetRowNumber, sheetId } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     if (!colLetter || !text || !String(text).trim()) {
-      return res
-        .status(400)
-        .json({ error: "Missing colLetter or comment text." });
+      return res.status(400).json({ error: 'Missing colLetter or comment text.' });
     }
 
     const colIndex = colLetterToIndex(colLetter);
     const rowIndex = (Number(sheetRowNumber) || 1) - 1;
     const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -905,80 +788,48 @@ app.post("/api/dcr/:dcrId/comment", async (req, res) => {
       },
     });
 
-    const { comments: updatedComments } = await getNativeCellComments(
-      token,
-      spreadsheetId,
-      MAIN_TAB,
-      rowIndex,
-      sheetRowNumber,
-    );
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
     res.json({ success: true, comments: updatedComments });
   } catch (error) {
-    console.error(
-      "Error adding native comment:",
-      error?.response?.data || error.message,
-    );
-    res
-      .status(error.statusCode || 500)
-      .json({ error: error?.response?.data?.error?.message || error.message });
+    console.error('Error adding native comment:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
   }
 });
 
-app.patch("/api/dcr/:dcrId/comment/:commentId", async (req, res) => {
+app.patch('/api/dcr/:dcrId/comment/:commentId', async (req, res) => {
   try {
     const { commentId } = req.params;
     const { text, sheetRowNumber } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     const sheets = getSheetsClient(req.headers.authorization);
     const drive = getDriveClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     await drive.comments.update({
       fileId: spreadsheetId,
       commentId,
-      fields: "id",
-      requestBody: { content: text.trim() },
+      fields: 'id',
+      requestBody: { content: text.trim() }
     });
 
     const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-    const { comments: updatedComments } = await getNativeCellComments(
-      token,
-      spreadsheetId,
-      MAIN_TAB,
-      rowIndex,
-      sheetRowNumber,
-    );
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
     res.json({ success: true, comments: updatedComments });
   } catch (error) {
-    console.error(
-      "Error editing comment:",
-      error?.response?.data || error.message,
-    );
-    res
-      .status(error.statusCode || 500)
-      .json({ error: error?.response?.data?.error?.message || error.message });
+    console.error('Error editing comment:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
   }
 });
 
-app.post("/api/dcr/:dcrId/comment/:commentId/reply", async (req, res) => {
+app.post('/api/dcr/:dcrId/comment/:commentId/reply', async (req, res) => {
   try {
     const { commentId } = req.params;
     const { text, sheetRowNumber } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -997,131 +848,73 @@ app.post("/api/dcr/:dcrId/comment/:commentId/reply", async (req, res) => {
     });
 
     const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-    const { comments: updatedComments } = await getNativeCellComments(
-      token,
-      spreadsheetId,
-      MAIN_TAB,
-      rowIndex,
-      sheetRowNumber,
-    );
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
     res.json({ success: true, comments: updatedComments });
   } catch (error) {
-    console.error(
-      "Error replying to comment:",
-      error?.response?.data || error.message,
-    );
-    res
-      .status(error.statusCode || 500)
-      .json({ error: error?.response?.data?.error?.message || error.message });
+    console.error('Error replying to comment:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
   }
 });
 
-app.patch(
-  "/api/dcr/:dcrId/comment/:commentId/reply/:replyId",
-  async (req, res) => {
-    try {
-      const { commentId, replyId } = req.params;
-      const { text, sheetRowNumber } = req.body;
-      const token = req.headers.authorization
-        ? req.headers.authorization.split(" ")[1]
-        : "";
-
-      const sheets = getSheetsClient(req.headers.authorization);
-      const drive = getDriveClient(req.headers.authorization);
-      const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-        req,
-        sheets,
-      );
-
-      await drive.replies.update({
-        fileId: spreadsheetId,
-        commentId,
-        replyId,
-        fields: "id",
-        requestBody: { content: text.trim() },
-      });
-
-      const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-      const { comments: updatedComments } = await getNativeCellComments(
-        token,
-        spreadsheetId,
-        MAIN_TAB,
-        rowIndex,
-        sheetRowNumber,
-      );
-      res.json({ success: true, comments: updatedComments });
-    } catch (error) {
-      console.error(
-        "Error editing reply:",
-        error?.response?.data || error.message,
-      );
-      res
-        .status(error.statusCode || 500)
-        .json({
-          error: error?.response?.data?.error?.message || error.message,
-        });
-    }
-  },
-);
-
-app.delete(
-  "/api/dcr/:dcrId/comment/:commentId/reply/:replyId",
-  async (req, res) => {
-    try {
-      const { commentId, replyId } = req.params;
-      const sheetRowNumber = req.query.sheetRowNumber;
-      const token = req.headers.authorization
-        ? req.headers.authorization.split(" ")[1]
-        : "";
-
-      const sheets = getSheetsClient(req.headers.authorization);
-      const drive = getDriveClient(req.headers.authorization);
-      const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-        req,
-        sheets,
-      );
-
-      await drive.replies.delete({
-        fileId: spreadsheetId,
-        commentId,
-        replyId,
-      });
-
-      const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-      const { comments: updatedComments } = await getNativeCellComments(
-        token,
-        spreadsheetId,
-        MAIN_TAB,
-        rowIndex,
-        sheetRowNumber,
-      );
-      res.json({ success: true, comments: updatedComments });
-    } catch (error) {
-      console.error(
-        "Error deleting reply:",
-        error?.response?.data || error.message,
-      );
-      res
-        .status(error.statusCode || 500)
-        .json({
-          error: error?.response?.data?.error?.message || error.message,
-        });
-    }
-  },
-);
-
-app.post("/api/dcr/:dcrId/comment/resolve", async (req, res) => {
+app.patch('/api/dcr/:dcrId/comment/:commentId/reply/:replyId', async (req, res) => {
   try {
-    const { commentId, sheetRowNumber, resolved } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const { commentId, replyId } = req.params;
+    const { text, sheetRowNumber } = req.body;
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const drive = getDriveClient(req.headers.authorization);
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
+
+    await drive.replies.update({
+      fileId: spreadsheetId,
+      commentId,
+      replyId,
+      fields: 'id',
+      requestBody: { content: text.trim() }
+    });
+
+    const rowIndex = (Number(sheetRowNumber) || 1) - 1;
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
+    res.json({ success: true, comments: updatedComments });
+  } catch (error) {
+    console.error('Error editing reply:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
+  }
+});
+
+app.delete('/api/dcr/:dcrId/comment/:commentId/reply/:replyId', async (req, res) => {
+  try {
+    const { commentId, replyId } = req.params;
+    const sheetRowNumber = req.query.sheetRowNumber;
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
+
+    const sheets = getSheetsClient(req.headers.authorization);
+    const drive = getDriveClient(req.headers.authorization);
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
+
+    await drive.replies.delete({
+      fileId: spreadsheetId,
+      commentId,
+      replyId
+    });
+
+    const rowIndex = (Number(sheetRowNumber) || 1) - 1;
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
+    res.json({ success: true, comments: updatedComments });
+  } catch (error) {
+    console.error('Error deleting reply:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
+  }
+});
+
+app.post('/api/dcr/:dcrId/comment/resolve', async (req, res) => {
+  try {
+    const { commentId, sheetRowNumber, resolved } = req.body;
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
+
+    const sheets = getSheetsClient(req.headers.authorization);
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -1131,7 +924,7 @@ app.post("/api/dcr/:dcrId/comment/resolve", async (req, res) => {
             addCommentReply: {
               commentId,
               post: {
-                commentAction: Boolean(resolved) ? "RESOLVE" : "REOPEN",
+                commentAction: Boolean(resolved) ? 'RESOLVE' : 'REOPEN',
               },
             },
           },
@@ -1145,35 +938,25 @@ app.post("/api/dcr/:dcrId/comment/resolve", async (req, res) => {
       spreadsheetId,
       MAIN_TAB,
       rowIndex,
-      sheetRowNumber,
+      sheetRowNumber
     );
 
     res.json({ success: true, comments: updatedComments });
   } catch (error) {
-    console.error(
-      "Error resolving native comment:",
-      error?.response?.data || error.message,
-    );
-    res
-      .status(error.statusCode || 500)
-      .json({ error: error?.response?.data?.error?.message || error.message });
+    console.error('Error resolving native comment:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
   }
 });
 
-app.delete("/api/dcr/:dcrId/comment/:commentId", async (req, res) => {
+app.delete('/api/dcr/:dcrId/comment/:commentId', async (req, res) => {
   try {
     const { commentId } = req.params;
     const sheetRowNumber = req.query.sheetRowNumber;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const token = req.headers.authorization ? req.headers.authorization.split(' ')[1] : '';
 
     const sheets = getSheetsClient(req.headers.authorization);
     const drive = getDriveClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
-      req,
-      sheets,
-    );
+    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(req, sheets);
 
     await drive.comments.delete({
       fileId: spreadsheetId,
@@ -1181,43 +964,32 @@ app.delete("/api/dcr/:dcrId/comment/:commentId", async (req, res) => {
     });
 
     const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-    const { comments: updatedComments } = await getNativeCellComments(
-      token,
-      spreadsheetId,
-      MAIN_TAB,
-      rowIndex,
-      sheetRowNumber,
-    );
+    const { comments: updatedComments } = await getNativeCellComments(token, spreadsheetId, MAIN_TAB, rowIndex, sheetRowNumber);
     res.json({ success: true, comments: updatedComments });
   } catch (error) {
-    console.error(
-      "Error deleting native comment:",
-      error?.response?.data || error.message,
-    );
-    res
-      .status(error.statusCode || 500)
-      .json({ error: error?.response?.data?.error?.message || error.message });
+    console.error('Error deleting native comment:', error?.response?.data || error.message);
+    res.status(error.statusCode || 500).json({ error: error?.response?.data?.error?.message || error.message });
   }
 });
 
 // ---------------------------------------------------------------------------
-// Batch Update (Supports both 'Cable Replacement' & 'DCR Form Responses')
+// Batch Update (Executes 'Cable Replacement' & 'DCR Form Responses' independently)
 // ---------------------------------------------------------------------------
 
-app.post("/api/dcr/:dcrId/batch", async (req, res) => {
+app.post('/api/dcr/:dcrId/batch', async (req, res) => {
   try {
     const { dcrId } = req.params;
     const { updates = {}, formResponseUpdates = {} } = req.body;
 
     const hasMainUpdates =
-      updates && typeof updates === "object" && Object.keys(updates).length > 0;
+      updates && typeof updates === 'object' && Object.keys(updates).length > 0;
     const hasFormRespUpdates =
       formResponseUpdates &&
-      typeof formResponseUpdates === "object" &&
+      typeof formResponseUpdates === 'object' &&
       Object.keys(formResponseUpdates).length > 0;
 
     if (!hasMainUpdates && !hasFormRespUpdates) {
-      return res.json({ success: true, message: "No updates to persist" });
+      return res.json({ success: true, message: 'No updates to persist' });
     }
 
     if (hasMainUpdates) {
@@ -1236,17 +1008,15 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
     const { targetRegion, spreadsheetId, userProfile } =
       await resolveRegionSpreadsheet(req, sheets);
 
-    const userRole = String(userProfile?.role || "")
-      .trim()
-      .toUpperCase();
+    const userRole = String(userProfile?.role || '').trim().toUpperCase();
     const canEditFormResponses =
-      userRole === "DIRECTOR" || userRole === "MANAGER";
+      userRole === 'DIRECTOR' || userRole === 'MANAGER';
 
     if (hasFormRespUpdates) {
       if (!canEditFormResponses) {
         return res.status(403).json({
           error:
-            "Only users with a Director or Manager role can edit DCR Form Responses.",
+            'Only users with a Director or Manager role can edit DCR Form Responses.',
         });
       }
 
@@ -1257,7 +1027,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
         if (colIndex === 24) {
           return res.status(403).json({
             error:
-              "Column Y (DCR ID) is strictly read-only and cannot be edited.",
+              'Column Y (DCR ID) is strictly read-only and cannot be edited.',
           });
         }
 
@@ -1279,7 +1049,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
         spreadsheetId,
         targetRegion.id,
         MAIN_TAB,
-        false,
+        false
       );
     const DCR_COL_INDEX = 24;
 
@@ -1291,7 +1061,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
     if (hasMainUpdates) {
       let foundIndex = -1;
       for (let i = 1; i < rows.length; i++) {
-        const cellVal = String(rows[i][DCR_COL_INDEX] || "").trim();
+        const cellVal = String(rows[i][DCR_COL_INDEX] || '').trim();
         if (cellVal.toLowerCase() === String(dcrId).trim().toLowerCase()) {
           foundIndex = i;
           break;
@@ -1308,7 +1078,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
       Object.entries(updates).forEach(([colLetter, value]) => {
         mainData.push({
           range: `'${MAIN_TAB}'!${colLetter.trim().toUpperCase()}${updatedMainRow}`,
-          values: [[value ?? ""]],
+          values: [[value ?? '']],
         });
       });
     }
@@ -1316,7 +1086,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
     if (hasFormRespUpdates) {
       let formRespFoundIndex = -1;
       for (let i = 1; i < (formResponseRows || []).length; i++) {
-        const cellVal = String(formResponseRows[i][DCR_COL_INDEX] || "").trim();
+        const cellVal = String(formResponseRows[i][DCR_COL_INDEX] || '').trim();
         if (cellVal.toLowerCase() === String(dcrId).trim().toLowerCase()) {
           formRespFoundIndex = i;
           break;
@@ -1333,7 +1103,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
       Object.entries(formResponseUpdates).forEach(([colLetter, value]) => {
         formRespData.push({
           range: `'${FORM_RESPONSES_TAB}'!${colLetter.trim().toUpperCase()}${updatedFormRespRow}`,
-          values: [[value ?? ""]],
+          values: [[value ?? '']],
         });
       });
     }
@@ -1343,7 +1113,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
         ? sheets.spreadsheets.values.batchUpdate({
             spreadsheetId,
             requestBody: {
-              valueInputOption: "USER_ENTERED",
+              valueInputOption: 'USER_ENTERED',
               data: mainData,
             },
           })
@@ -1352,7 +1122,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
         ? sheets.spreadsheets.values.batchUpdate({
             spreadsheetId,
             requestBody: {
-              valueInputOption: "USER_ENTERED",
+              valueInputOption: 'USER_ENTERED',
               data: formRespData,
             },
           })
@@ -1360,9 +1130,9 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
     ]);
 
     const mainSaved =
-      mainData.length === 0 || mainResult.status === "fulfilled";
+      mainData.length === 0 || mainResult.status === 'fulfilled';
     const formRespSaved =
-      formRespData.length === 0 || formRespResult.status === "fulfilled";
+      formRespData.length === 0 || formRespResult.status === 'fulfilled';
 
     if (
       (mainData.length > 0 && mainSaved) ||
@@ -1379,10 +1149,10 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
         (!mainSaved &&
           (mainResult.reason?.response?.data?.error?.message ||
             mainResult.reason?.message)) ||
-        "Batch update failed";
+        'Batch update failed';
 
       const friendlyError =
-        !formRespSaved && rawErr.toLowerCase().includes("protected cell")
+        !formRespSaved && rawErr.toLowerCase().includes('protected cell')
           ? `Google Sheets tab "${FORM_RESPONSES_TAB}" is protected. Ask the spreadsheet owner to add your Google account to "Data → Protect sheets and ranges" for "${FORM_RESPONSES_TAB}".`
           : rawErr;
 
@@ -1408,8 +1178,8 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
     });
   } catch (error) {
     console.error(
-      "Error batch updating DCR:",
-      error?.response?.data || error.message,
+      'Error batch updating DCR:',
+      error?.response?.data || error.message
     );
     const status = error.statusCode || error?.response?.status || 500;
     res.status(status).json({
@@ -1422,7 +1192,7 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
 // Drive Photo & File Management Endpoints (Upload, List, Stream, Trash)
 // ---------------------------------------------------------------------------
 
-app.get("/api/drive/folder/:folderId/files", async (req, res) => {
+app.get('/api/drive/folder/:folderId/files', async (req, res) => {
   try {
     const { folderId } = req.params;
     const authHeader = req.headers.authorization;
@@ -1430,70 +1200,57 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
 
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
-      fields:
-        "files(id, name, mimeType, thumbnailLink, webViewLink, size, modifiedTime)",
+      fields: 'files(id, name, mimeType, thumbnailLink, webViewLink, size, modifiedTime)',
       pageSize: 100,
-      orderBy: "folder,name",
+      orderBy: 'folder,name',
     });
 
     const files = response.data.files || [];
-    const images = files.filter(
-      (f) => f.mimeType && f.mimeType.startsWith("image/"),
-    );
+    const images = files.filter((f) => f.mimeType && f.mimeType.startsWith('image/'));
 
     res.json({ files, images });
   } catch (err) {
-    console.error("Error listing folder files:", err);
-    res
-      .status(500)
-      .json({ error: err.message || "Failed to list folder files" });
+    console.error('Error listing folder files:', err);
+    res.status(500).json({ error: err.message || 'Failed to list folder files' });
   }
 });
 
-app.post(
-  "/api/drive/folder/:folderId/upload",
-  upload.array("files"),
-  async (req, res) => {
-    try {
-      const { folderId } = req.params;
-      const authHeader = req.headers.authorization;
-      const drive = getDriveClient(authHeader);
+app.post('/api/drive/folder/:folderId/upload', upload.array('files'), async (req, res) => {
+  try {
+    const { folderId } = req.params;
+    const authHeader = req.headers.authorization;
+    const drive = getDriveClient(authHeader);
 
-      if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: "No files provided for upload." });
-      }
-
-      const uploadPromises = req.files.map((file) => {
-        const fileMetadata = {
-          name: file.originalname,
-          parents: [folderId],
-        };
-        const media = {
-          mimeType: file.mimetype || "application/octet-stream",
-          body: Readable.from(file.buffer),
-        };
-
-        return drive.files.create({
-          requestBody: fileMetadata,
-          media,
-          fields: "id, name, mimeType, webViewLink",
-        });
-      });
-
-      const uploaded = await Promise.all(uploadPromises);
-      res.json({ success: true, count: uploaded.length });
-    } catch (err) {
-      console.error("Error uploading file(s) to Google Drive:", err);
-      res
-        .status(500)
-        .json({
-          error: err.message || "Failed to upload files to Google Drive",
-        });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files provided for upload.' });
     }
-  },
-);
 
-app.delete("/api/drive/file/:fileId", async (req, res) => {
+    const uploadPromises = req.files.map((file) => {
+      const fileMetadata = {
+        name: file.originalname,
+        parents: [folderId],
+      };
+      const media = {
+        mimeType: file.mimetype || 'application/octet-stream',
+        body: Readable.from(file.buffer),
+      };
+
+      return drive.files.create({
+        requestBody: fileMetadata,
+        media,
+        fields: 'id, name, mimeType, webViewLink',
+      });
+    });
+
+    const uploaded = await Promise.all(uploadPromises);
+    res.json({ success: true, count: uploaded.length });
+  } catch (err) {
+    console.error('Error uploading file(s) to Google Drive:', err);
+    res.status(500).json({ error: err.message || 'Failed to upload files to Google Drive' });
+  }
+});
+
+app.delete('/api/drive/file/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
     const authHeader = req.headers.authorization;
@@ -1506,43 +1263,38 @@ app.delete("/api/drive/file/:fileId", async (req, res) => {
       },
     });
 
-    res.json({ success: true, message: "File moved to Google Drive trash" });
+    res.json({ success: true, message: 'File moved to Google Drive trash' });
   } catch (err) {
-    console.error("Error moving file to Google Drive trash:", err);
-    res.status(500).json({ error: err.message || "Failed to trash file" });
+    console.error('Error moving file to Google Drive trash:', err);
+    res.status(500).json({ error: err.message || 'Failed to trash file' });
   }
 });
 
-app.get("/api/drive/file/:fileId", async (req, res) => {
+app.get('/api/drive/file/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
-    const authHeader =
-      req.headers.authorization ||
-      (req.query.token ? `Bearer ${req.query.token}` : null);
+    const authHeader = req.headers.authorization || (req.query.token ? `Bearer ${req.query.token}` : null);
 
     if (!authHeader) {
-      return res.status(401).send("Missing authorization token");
+      return res.status(401).send('Missing authorization token');
     }
 
     const drive = getDriveClient(authHeader);
 
     const response = await drive.files.get(
-      { fileId, alt: "media" },
-      { responseType: "stream" },
+      { fileId, alt: 'media' },
+      { responseType: 'stream' }
     );
 
-    if (response.headers["content-type"]) {
-      res.setHeader("Content-Type", response.headers["content-type"]);
+    if (response.headers['content-type']) {
+      res.setHeader('Content-Type', response.headers['content-type']);
     }
-    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.setHeader('Cache-Control', 'private, max-age=86400');
 
     response.data.pipe(res);
   } catch (error) {
-    console.error(
-      "Error streaming drive file:",
-      error?.response?.data || error.message,
-    );
-    res.status(500).send("Failed to stream image");
+    console.error('Error streaming drive file:', error?.response?.data || error.message);
+    res.status(500).send('Failed to stream image');
   }
 });
 
@@ -1550,12 +1302,12 @@ app.get("/api/drive/file/:fileId", async (req, res) => {
 // Static Asset Serving
 // ---------------------------------------------------------------------------
 
-if (process.env.NODE_ENV === "production") {
-  const clientDistPath = path.join(__dirname, "../../client/dist");
+if (process.env.NODE_ENV === 'production') {
+  const clientDistPath = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDistPath));
 
-  app.get("/{*splat}", (req, res) => {
-    res.sendFile(path.join(clientDistPath, "index.html"));
+  app.get('/{*splat}', (req, res) => {
+    res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 }
 

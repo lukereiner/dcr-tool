@@ -176,7 +176,7 @@ function NavigationBar({
   const location = useLocation();
 
   const navItems = [
-    { label: "Dashboard", path: "/" },
+    { label: "Master", path: "/" },
     { label: "Coordinator", path: "/coordinator" },
     { label: "Sheet Data", path: "/data" },
     // { label: "Pole Transfers", path: "/pole-transfers" },
@@ -517,7 +517,7 @@ function AppContent() {
                         border: "1px solid #ddd",
                       }}
                     >
-                      <h3>Dashboard</h3>
+                      <h3>Master</h3>
                       <p style={{ color: "#666" }}>
                         Active Region:{" "}
                         <strong>{activeRegion?.name || "None"}</strong>.
