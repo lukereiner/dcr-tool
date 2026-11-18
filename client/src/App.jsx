@@ -91,7 +91,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
         }}
       >
         <h2 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>
-          DCR Tool Portal
+          DCR Portal
         </h2>
         <p
           style={{
@@ -101,8 +101,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             lineHeight: 1.5,
           }}
         >
-          Sign in with your authorized Google account to review and manage
-          operations.
+          Sign in with your authorized Google account
         </p>
 
         {sessionExpired && !loginError && (
@@ -143,6 +142,10 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             login();
           }}
           style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '5px',
             padding: "12px 24px",
             background: "#1a73e8",
             color: "#fff",
@@ -154,8 +157,8 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             width: "100%",
           }}
         >
+          Sign in with
           <FaGoogle />
-          Sign in with Google
         </button>
       </div>
     </div>
