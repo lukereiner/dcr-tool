@@ -23,6 +23,63 @@ function decodeHtmlEntities(text) {
   return txt.value;
 }
 
+// Recursively read all entries from a FileSystemDirectoryReader (handles >100 items per folder)
+async function readAllDirectoryEntries(directoryReader) {
+  const allEntries = [];
+  let batch = [];
+  do {
+    batch = await new Promise((resolve, reject) => {
+      directoryReader.readEntries(resolve, reject);
+    });
+    allEntries.push(...batch);
+  } while (batch.length > 0);
+  return allEntries;
+}
+
+// Recursively walk dropped FileSystemEntry items to extract nested files & empty folders
+async function traverseFileSystemEntry(entry, parentPath = "") {
+  if (!entry) return { files: [], emptyFolders: [] };
+
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => {
+      entry.file(resolve, reject);
+    });
+    const relativePath = parentPath ? `${parentPath}/${file.name}` : file.name;
+    return {
+      files: [{ file, relativePath }],
+      emptyFolders: [],
+    };
+  }
+
+  if (entry.isDirectory) {
+    const currentPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+    const reader = entry.createReader();
+    const childEntries = await readAllDirectoryEntries(reader);
+
+    if (childEntries.length === 0) {
+      return {
+        files: [],
+        emptyFolders: [currentPath],
+      };
+    }
+
+    const nestedFiles = [];
+    const nestedEmptyFolders = [];
+    for (const child of childEntries) {
+      const result = await traverseFileSystemEntry(child, currentPath);
+      nestedFiles.push(...result.files);
+      nestedEmptyFolders.push(...result.emptyFolders);
+    }
+
+    return {
+      files: nestedFiles,
+      emptyFolders: nestedEmptyFolders,
+    };
+  }
+
+  return { files: [], emptyFolders: [] };
+}
+
 const DROPDOWN_FIELD_OPTIONS = {
   Z: ["Approved", "Denied"],
   AE: [
@@ -63,6 +120,16 @@ const FORM_RESPONSE_DROPDOWN_FALLBACKS = {
 };
 
 function getFileBadge(mimeType, name) {
+  if (mimeType === "application/vnd.google-apps.folder") {
+    return {
+      label: "FOLDER",
+      bg: "#f3e8ff",
+      text: "#7e22ce",
+      darkBg: "#3b0764",
+      darkText: "#d8b4fe",
+    };
+  }
+
   if (mimeType?.startsWith("image/")) {
     return {
       label: "IMG",
@@ -935,7 +1002,15 @@ export default function DCRReview({
   // Drag and Drop & Uploading States
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({
+    completed: 0,
+    total: 0,
+    currentFileName: "",
+  });
   const dragCounterRef = useRef(0);
+  const [isCancellingUpload, setIsCancellingUpload] = useState(false);
+  const uploadAbortControllerRef = useRef(null);
+  const uploadCancelledRef = useRef(false);
 
   // File Delete Confirmation Modal States
   const [fileToDelete, setFileToDelete] = useState(null);
@@ -1240,6 +1315,9 @@ export default function DCRReview({
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       Object.values(fadeTimersRef.current).forEach((t) => clearTimeout(t));
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+      if (uploadAbortControllerRef.current) {
+        uploadAbortControllerRef.current.abort();
+      }
     };
   }, []);
 
@@ -1424,40 +1502,189 @@ export default function DCRReview({
       return;
     }
 
+    // Synchronously capture entries before any async await clears dataTransfer.items
+    const dataItems = e.dataTransfer.items
+      ? Array.from(e.dataTransfer.items)
+      : [];
+    const entries = dataItems
+      .filter(
+        (item) =>
+          item.kind === "file" && typeof item.webkitGetAsEntry === "function",
+      )
+      .map((item) => item.webkitGetAsEntry())
+      .filter(Boolean);
+
+    if (entries.length > 0) {
+      const collectedFiles = [];
+      const collectedEmptyFolders = [];
+      let topLevelFoldersCount = 0;
+
+      for (const entry of entries) {
+        if (entry.isDirectory) topLevelFoldersCount += 1;
+        const result = await traverseFileSystemEntry(entry, "");
+        collectedFiles.push(...result.files);
+        collectedEmptyFolders.push(...result.emptyFolders);
+      }
+
+      if (collectedFiles.length > 0 || collectedEmptyFolders.length > 0) {
+        await uploadFilesToDrive(
+          folderId,
+          collectedFiles,
+          collectedEmptyFolders,
+          topLevelFoldersCount,
+        );
+      }
+      return;
+    }
+
+    // Fallback for browsers without webkitGetAsEntry
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      await uploadFilesToDrive(folderId, Array.from(e.dataTransfer.files));
+      const plainItems = Array.from(e.dataTransfer.files).map((file) => ({
+        file,
+        relativePath: file.name,
+      }));
+      await uploadFilesToDrive(folderId, plainItems, [], 0);
     }
   };
 
-  const uploadFilesToDrive = async (folderId, filesToUpload) => {
+  const handleCancelUpload = () => {
+    if (!isUploadingFiles || isCancellingUpload) return;
+    setIsCancellingUpload(true);
+    uploadCancelledRef.current = true;
+    if (uploadAbortControllerRef.current) {
+      uploadAbortControllerRef.current.abort();
+    }
+  };
+
+  const uploadFilesToDrive = async (
+    folderId,
+    fileEntries,
+    emptyFolders = [],
+    topLevelFoldersCount = 0,
+  ) => {
+    const controller = new AbortController();
+    uploadAbortControllerRef.current = controller;
+    uploadCancelledRef.current = false;
+
+    setIsCancellingUpload(false);
     setIsUploadingFiles(true);
+    setUploadProgress({
+      completed: 0,
+      total: fileEntries.length,
+      currentFileName:
+        fileEntries.length > 0 ? "Preparing folders..." : "Creating folders...",
+    });
+
     try {
-      const formData = new FormData();
-      filesToUpload.forEach((file) => {
-        formData.append("files", file);
+      // 1. Pre-create any folder hierarchy first so parallel workers never race
+      const allDirPathsSet = new Set(emptyFolders);
+      fileEntries.forEach(({ relativePath }) => {
+        const rel = String(relativePath || "");
+        const lastSlash = rel.lastIndexOf("/");
+        if (lastSlash !== -1) {
+          allDirPathsSet.add(rel.substring(0, lastSlash));
+        }
       });
 
-      const res = await fetch(`/api/drive/folder/${folderId}/upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: formData,
+      const allDirPaths = Array.from(allDirPathsSet);
+      if (allDirPaths.length > 0) {
+        const prepFormData = new FormData();
+        prepFormData.append("emptyFolders", JSON.stringify(allDirPaths));
+
+        const prepRes = await fetch(`/api/drive/folder/${folderId}/upload`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: prepFormData,
+          signal: controller.signal,
+        });
+
+        const prepData = await prepRes.json();
+        if (!prepRes.ok) {
+          throw new Error(prepData.error || "Failed to create Drive folders");
+        }
+      }
+
+      // 2. Upload files with a concurrency pool of 3 and live progress updates
+      let completedCount = 0;
+      let nextIndex = 0;
+      const concurrency = Math.min(3, fileEntries.length);
+
+      const workers = Array.from({ length: concurrency }, async () => {
+        while (nextIndex < fileEntries.length) {
+          if (uploadCancelledRef.current || controller.signal.aborted) {
+            break;
+          }
+
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+
+          const { file, relativePath } = fileEntries[currentIndex];
+          setUploadProgress((prev) => ({
+            ...prev,
+            currentFileName: file.name,
+          }));
+
+          const formData = new FormData();
+          formData.append("files", file);
+          formData.append(
+            "relativePaths",
+            JSON.stringify([relativePath || file.name]),
+          );
+
+          const res = await fetch(`/api/drive/folder/${folderId}/upload`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: formData,
+            signal: controller.signal,
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || `Failed to upload ${file.name}`);
+          }
+
+          completedCount += 1;
+          setUploadProgress({
+            completed: completedCount,
+            total: fileEntries.length,
+            currentFileName: file.name,
+          });
+        }
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to upload file(s)");
+      await Promise.all(workers);
 
-      showToast(
-        `Uploaded ${filesToUpload.length} file(s) to Google Drive`,
-        "success",
-      );
+      if (uploadCancelledRef.current || controller.signal.aborted) {
+        showToast("Upload canceled", "info");
+        await fetchFolderPhotos(folderId);
+        return;
+      }
+
+      const statusMsg =
+        topLevelFoldersCount > 0
+          ? `Uploaded ${topLevelFoldersCount} folder(s) (${fileEntries.length} file(s)) to Google Drive`
+          : `Uploaded ${fileEntries.length} file(s) to Google Drive`;
+
+      showToast(statusMsg, "success");
       await fetchFolderPhotos(folderId);
     } catch (err) {
-      console.error("Upload error:", err);
-      showToast(`Upload failed: ${err.message}`, "error");
+      if (err.name === "AbortError" || uploadCancelledRef.current) {
+        showToast("Upload canceled", "info");
+        await fetchFolderPhotos(folderId);
+      } else {
+        console.error("Upload error:", err);
+        showToast(`Upload failed: ${err.message}`, "error");
+      }
     } finally {
+      uploadAbortControllerRef.current = null;
+      uploadCancelledRef.current = false;
+      setIsCancellingUpload(false);
       setIsUploadingFiles(false);
+      setUploadProgress({ completed: 0, total: 0, currentFileName: "" });
     }
   };
 
@@ -2828,32 +3055,149 @@ export default function DCRReview({
                     style={{
                       position: "absolute",
                       inset: 0,
-                      backgroundColor: "rgba(255, 255, 255, 0.85)",
+                      backgroundColor: "var(--bg-card)",
+                      opacity: 0.96,
+                      backdropFilter: "blur(3px)",
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
                       justifyContent: "center",
                       zIndex: 60,
                       borderRadius: "6px",
+                      padding: "24px",
+                      boxSizing: "border-box",
                     }}
                   >
-                    <span
+                    <div
                       style={{
-                        display: "inline-block",
-                        width: "28px",
-                        height: "28px",
-                        border: "3px solid rgba(59, 130, 246, 0.25)",
-                        borderTop: "3px solid #3b82f6",
-                        borderRadius: "50%",
-                        animation: "btnSpin 0.7s linear infinite",
-                        marginBottom: "10px",
+                        width: "100%",
+                        maxWidth: "360px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "10px",
                       }}
-                    />
-                    <strong
-                      style={{ fontSize: "13px", color: "var(--text-main)" }}
                     >
-                      Uploading files to Google Drive...
-                    </strong>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          color: "var(--text-main)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: "14px",
+                              height: "14px",
+                              border: "2px solid rgba(59, 130, 246, 0.25)",
+                              borderTop:
+                                "2px solid var(--btn-primary-bg, #1a73e8)",
+                              borderRadius: "50%",
+                              animation: "btnSpin 0.7s linear infinite",
+                            }}
+                          />
+                          Uploading to Google Drive...
+                        </span>
+                        {uploadProgress.total > 0 && (
+                          <span
+                            style={{ color: "var(--btn-primary-bg, #1a73e8)" }}
+                          >
+                            {uploadProgress.completed} / {uploadProgress.total}{" "}
+                            (
+                            {Math.round(
+                              (uploadProgress.completed /
+                                uploadProgress.total) *
+                                100,
+                            )}
+                            %)
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Progress Bar Track */}
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "8px",
+                          backgroundColor: "var(--border-subtle, #e5e7eb)",
+                          borderRadius: "999px",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width:
+                              uploadProgress.total > 0
+                                ? `${Math.min(
+                                    100,
+                                    Math.round(
+                                      (uploadProgress.completed /
+                                        uploadProgress.total) *
+                                        100,
+                                    ),
+                                  )}%`
+                                : "35%",
+                            height: "100%",
+                            backgroundColor: "var(--btn-primary-bg, #1a73e8)",
+                            borderRadius: "999px",
+                            transition: "width 0.2s ease",
+                          }}
+                        />
+                      </div>
+
+                      {uploadProgress.currentFileName && (
+                        <div
+                          style={{
+                            fontSize: "12px",
+                            color: "var(--text-muted)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            textAlign: "center",
+                          }}
+                          title={uploadProgress.currentFileName}
+                        >
+                          {uploadProgress.currentFileName}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "center",
+                          marginTop: "4px",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={handleCancelUpload}
+                          disabled={isCancellingUpload}
+                          className="btn-secondary"
+                          style={{
+                            padding: "5px 14px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            borderRadius: "6px",
+                            cursor: isCancellingUpload
+                              ? "not-allowed"
+                              : "pointer",
+                            opacity: isCancellingUpload ? 0.7 : 1,
+                          }}
+                        >
+                          {isCancellingUpload ? "Canceling..." : "Cancel"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -2922,6 +3266,14 @@ export default function DCRReview({
                               "data-theme",
                             ) === "dark";
                           const isImg = file.mimeType?.startsWith("image/");
+                          const isFolder =
+                            file.mimeType ===
+                            "application/vnd.google-apps.folder";
+                          const openHref =
+                            file.webViewLink ||
+                            (isFolder
+                              ? `https://drive.google.com/drive/folders/${file.id}`
+                              : `https://drive.google.com/file/d/${file.id}/view`);
                           return (
                             <tr
                               key={file.id}
@@ -2999,10 +3351,7 @@ export default function DCRReview({
                                     </button>
                                   )}
                                   <a
-                                    href={
-                                      file.webViewLink ||
-                                      `https://drive.google.com/file/d/${file.id}/view`
-                                    }
+                                    href={openHref}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="btn-secondary"
