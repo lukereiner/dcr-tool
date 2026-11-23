@@ -1439,6 +1439,8 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
         "files(id, name, mimeType, thumbnailLink, webViewLink, size, modifiedTime)",
       pageSize: 100,
       orderBy: "folder,name",
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     const files = response.data.files || [];
@@ -1462,6 +1464,11 @@ function createAbortError(message = "Upload aborted by client") {
   const err = new Error(message);
   err.name = "AbortError";
   return err;
+}
+
+function isDriveNotFoundError(err) {
+  const status = err?.response?.status || err?.code;
+  return Number(status) === 404;
 }
 
 function isDriveRateLimitError(err) {
@@ -1598,7 +1605,7 @@ app.post(
           .json({ error: "No files or folders provided for upload." });
       }
 
-      const ensureDriveFolder = async (dirPath) => {
+      const ensureDriveFolder = async (dirPath, bypassCache = false) => {
         if (signal.aborted) {
           throw createAbortError();
         }
@@ -1612,11 +1619,17 @@ app.post(
         if (!normalized) return folderId;
 
         const cacheKey = `${folderId}::${normalized}`;
-        const cachedId = driveSubfolderCache.get(cacheKey);
-        if (cachedId) return cachedId;
 
-        if (pendingFolderCreations.has(cacheKey)) {
-          return pendingFolderCreations.get(cacheKey);
+        if (bypassCache) {
+          driveSubfolderCache.del(cacheKey);
+        } else {
+          const cachedId = driveSubfolderCache.get(cacheKey);
+          if (cachedId) return cachedId;
+        }
+
+        const inflightKey = `${cacheKey}::${bypassCache ? "fresh" : "cached"}`;
+        if (pendingFolderCreations.has(inflightKey)) {
+          return pendingFolderCreations.get(inflightKey);
         }
 
         const createPromise = (async () => {
@@ -1624,7 +1637,7 @@ app.post(
             const parts = normalized.split("/");
             const folderName = parts[parts.length - 1];
             const parentPath = parts.slice(0, -1).join("/");
-            const parentId = await ensureDriveFolder(parentPath);
+            const parentId = await ensureDriveFolder(parentPath, bypassCache);
 
             const safeName = folderName
               .replace(/\\/g, "\\\\")
@@ -1636,6 +1649,8 @@ app.post(
                     q: `'${parentId}' in parents and name = '${safeName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
                     fields: "files(id, name)",
                     pageSize: 1,
+                    supportsAllDrives: true,
+                    includeItemsFromAllDrives: true,
                   },
                   { signal },
                 ),
@@ -1659,6 +1674,7 @@ app.post(
                       parents: [parentId],
                     },
                     fields: "id, name",
+                    supportsAllDrives: true,
                   },
                   { signal },
                 ),
@@ -1670,23 +1686,61 @@ app.post(
             driveSubfolderCache.set(cacheKey, newId);
             return newId;
           } finally {
-            pendingFolderCreations.delete(cacheKey);
+            pendingFolderCreations.delete(inflightKey);
           }
         })();
 
-        pendingFolderCreations.set(cacheKey, createPromise);
+        pendingFolderCreations.set(inflightKey, createPromise);
         return createPromise;
       };
 
-      // Ensure any specified folders exist in Drive
+      // Always verify against Drive (bypassCache = true) during folder-prep
+      // so deleted/trashed folders are recreated instead of reusing stale IDs
       for (const dirPath of emptyFolders) {
         if (signal.aborted) {
           throw createAbortError();
         }
-        await ensureDriveFolder(dirPath);
+        await ensureDriveFolder(dirPath, true);
       }
 
-      // Upload files with max 3 concurrent Drive requests and abort-aware streams
+      const uploadSingleFileToDrive = (file, targetFileName, targetParentId) =>
+        runWithDriveRetry(
+          () => {
+            const bodyStream = Readable.from(file.buffer);
+            const destroyStreamOnAbort = () => {
+              if (!bodyStream.destroyed) {
+                bodyStream.destroy(createAbortError());
+              }
+            };
+            signal.addEventListener("abort", destroyStreamOnAbort, {
+              once: true,
+            });
+
+            return drive.files
+              .create(
+                {
+                  requestBody: {
+                    name: targetFileName || file.originalname,
+                    parents: [targetParentId],
+                  },
+                  media: {
+                    mimeType: file.mimetype || "application/octet-stream",
+                    body: bodyStream,
+                  },
+                  fields: "id, name, mimeType, webViewLink",
+                  supportsAllDrives: true,
+                },
+                { signal },
+              )
+              .finally(() => {
+                signal.removeEventListener("abort", destroyStreamOnAbort);
+              });
+          },
+          5,
+          signal,
+        );
+
+      // Upload files with max 3 concurrent Drive requests and 404 parent recovery
       const uploaded = await runWithConcurrency(
         req.files || [],
         3,
@@ -1704,42 +1758,26 @@ app.post(
               ? relPath.substring(lastSlash + 1)
               : file.originalname;
 
-          const targetParentId = await ensureDriveFolder(dirPath);
+          const targetParentId = await ensureDriveFolder(dirPath, false);
 
-          return runWithDriveRetry(
-            () => {
-              const bodyStream = Readable.from(file.buffer);
-              const destroyStreamOnAbort = () => {
-                if (!bodyStream.destroyed) {
-                  bodyStream.destroy(createAbortError());
-                }
-              };
-              signal.addEventListener("abort", destroyStreamOnAbort, {
-                once: true,
-              });
-
-              return drive.files
-                .create(
-                  {
-                    requestBody: {
-                      name: targetFileName || file.originalname,
-                      parents: [targetParentId],
-                    },
-                    media: {
-                      mimeType: file.mimetype || "application/octet-stream",
-                      body: bodyStream,
-                    },
-                    fields: "id, name, mimeType, webViewLink",
-                  },
-                  { signal },
-                )
-                .finally(() => {
-                  signal.removeEventListener("abort", destroyStreamOnAbort);
-                });
-            },
-            5,
-            signal,
-          );
+          try {
+            return await uploadSingleFileToDrive(
+              file,
+              targetFileName,
+              targetParentId,
+            );
+          } catch (err) {
+            // If cached subfolder was deleted/trashed in Drive, re-verify and retry once
+            if (dirPath && isDriveNotFoundError(err) && !signal.aborted) {
+              const freshParentId = await ensureDriveFolder(dirPath, true);
+              return await uploadSingleFileToDrive(
+                file,
+                targetFileName,
+                freshParentId,
+              );
+            }
+            throw err;
+          }
         },
         signal,
       );
@@ -1780,10 +1818,14 @@ app.delete("/api/drive/file/:fileId", async (req, res) => {
 
     await drive.files.update({
       fileId,
+      supportsAllDrives: true,
       requestBody: {
         trashed: true,
       },
     });
+
+    // Clear cached subfolder IDs in case a folder was moved to trash
+    driveSubfolderCache.flushAll();
 
     res.json({ success: true, message: "File moved to Google Drive trash" });
   } catch (err) {

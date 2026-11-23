@@ -2600,7 +2600,26 @@ export default function DCRReview({
 
                     <div style={{ marginTop: "auto" }}>
                       {f.isReadOnly ? (
-                        isLong && !isExpanded ? (
+                        dcrData.canEditFormResponses ? (
+                          <div
+                            style={{
+                              height: "38px",
+                              minHeight: "38px",
+                              display: "flex",
+                              alignItems: "center",
+                              fontSize: "14px",
+                              fontWeight: 500,
+                              wordBreak: "break-word",
+                              color: f.value
+                                ? "var(--text-main)"
+                                : "var(--text-subtle)",
+                              lineHeight: "1.4",
+                              boxSizing: "border-box",
+                            }}
+                          >
+                            {f.value || "—"}
+                          </div>
+                        ) : isLong && !isExpanded ? (
                           <div
                             style={{
                               position: "relative",
