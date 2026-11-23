@@ -1,4 +1,11 @@
-import { useState, useMemo, useEffect, useContext } from "react";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useContext,
+  useRef,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../App";
 import { useToast } from "../context/ToastContext";
@@ -32,6 +39,7 @@ export default function Data({
   setPageSize,
   fetchSheet,
   loading,
+  availableTabs = [],
 }) {
   const navigate = useNavigate();
   const { accessToken, logout } = useContext(AuthContext);
@@ -39,6 +47,10 @@ export default function Data({
 
   const [editingCell, setEditingCell] = useState(null);
   const [previewPhotoId, setPreviewPhotoId] = useState(null);
+
+  const tabBarRef = useRef(null);
+  const activeTabBtnRef = useRef(null);
+  const hasScrolledInitialRef = useRef(false);
 
   // Debounced search query state
   const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
@@ -122,6 +134,32 @@ export default function Data({
     return filteredRows.slice(start, start + pageSize);
   }, [filteredRows, page, pageSize]);
 
+  // Keep the active sheet tab scrolled into view on mount/return and when switching tabs
+  useLayoutEffect(() => {
+    const container = tabBarRef.current;
+    const activeBtn = activeTabBtnRef.current;
+    if (!container || !activeBtn) return;
+
+    const targetScrollLeft = Math.max(
+      0,
+      activeBtn.offsetLeft -
+        container.clientWidth / 2 +
+        activeBtn.offsetWidth / 2,
+    );
+
+    if (!hasScrolledInitialRef.current) {
+      container.scrollLeft = targetScrollLeft;
+      if (availableTabs.length > 0) {
+        hasScrolledInitialRef.current = true;
+      }
+    } else {
+      container.scrollTo({
+        left: targetScrollLeft,
+        behavior: "smooth",
+      });
+    }
+  }, [tabName, availableTabs, currentPageRows.length, loading]);
+
   const handleSaveCell = async () => {
     if (!editingCell || !accessToken) return;
     const { cellA1, value, sheetRow, colIndex } = editingCell;
@@ -159,6 +197,66 @@ export default function Data({
     }
   };
 
+  const renderTabBar = () => {
+    const tabsToRender = availableTabs.length > 0 ? availableTabs : [tabName];
+
+    return (
+      <div
+        ref={tabBarRef}
+        className="sheet-tab-bar"
+        style={{
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          overflowX: "auto",
+          background: "var(--bg-card-subtle)",
+          borderTop: "1px solid var(--border-color)",
+          padding: "0 8px",
+          flexShrink: 0,
+        }}
+      >
+        {tabsToRender.map((sheetName) => {
+          const isActive = tabName === sheetName;
+          return (
+            <button
+              key={sheetName}
+              ref={isActive ? activeTabBtnRef : null}
+              type="button"
+              onClick={() => {
+                if (!isActive) {
+                  setTabName(sheetName);
+                  setPage(1);
+                }
+              }}
+              className={`sheet-tab-btn ${isActive ? "active" : ""}`}
+              style={{
+                padding: "10px 16px",
+                background: isActive ? "var(--bg-card)" : "transparent",
+                color: isActive
+                  ? "var(--btn-primary-bg, #1a73e8)"
+                  : "var(--text-muted)",
+                border: "none",
+                borderTop: isActive
+                  ? "2px solid var(--btn-primary-bg, #1a73e8)"
+                  : "2px solid transparent",
+                borderRight: "1px solid var(--border-color)",
+                borderLeft: isActive ? "1px solid var(--border-color)" : "none",
+                fontSize: "13px",
+                fontWeight: isActive ? 600 : 500,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "all 0.1s ease",
+                outline: "none",
+              }}
+            >
+              {sheetName}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div style={{ maxWidth: "1400px", margin: "0 auto" }}>
       <style>{`
@@ -190,6 +288,10 @@ export default function Data({
           outline-offset: -1px;
         }
 
+        .sheet-tab-btn:not(.active):hover {
+          background-color: var(--bg-input) !important;
+          color: var(--text-main) !important;
+        }
 
         /* High-visibility amber search highlight */
         .sheet-cell-match {
@@ -204,7 +306,6 @@ export default function Data({
         [data-theme='dark'] .sheet-cell-match {
           background-color: rgba(245, 158, 11, 0.24) !important;
         }
-
 
         /* Search Match Panel Table Row */
         .match-list-row {
@@ -226,21 +327,6 @@ export default function Data({
           flexWrap: "wrap",
         }}
       >
-        <select
-          value={tabName}
-          onChange={(e) => {
-            setTabName(e.target.value);
-            setPage(1);
-          }}
-          className="dcr-select"
-          style={{ minWidth: "180px" }}
-        >
-          <option value="Cable Replacement">Cable Replacement</option>
-          <option value="QC Responses">QC Responses</option>
-          <option value="Pole Transfers Form">Pole Transfers Form</option>
-          <option value="Do's & Don'ts">Do's & Don'ts</option>
-        </select>
-
         <button
           onClick={() => fetchSheet(true)}
           disabled={loading}
@@ -358,9 +444,12 @@ export default function Data({
             boxShadow: "var(--shadow-card)",
             overflow: "hidden",
             marginBottom: cleanQuery ? "24px" : "0",
+            display: "flex",
+            flexDirection: "column",
+            maxHeight: "75vh",
           }}
         >
-          <div style={{ overflowX: "auto", maxHeight: "70vh" }}>
+          <div style={{ overflowX: "auto", flex: 1, minHeight: 0 }}>
             <table
               style={{
                 borderCollapse: "collapse",
@@ -522,11 +611,12 @@ export default function Data({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "12px 18px",
+              padding: "10px 18px",
               borderTop: "1px solid var(--border-color)",
-              background: "var(--bg-card-subtle)",
+              background: "var(--bg-card)",
               fontSize: "13px",
               color: "var(--text-muted)",
+              flexShrink: 0,
             }}
           >
             <div>
@@ -569,22 +659,37 @@ export default function Data({
               </select>
             </div>
           </div>
+
+          {/* Google Sheets Style Bottom Tab Bar */}
+          {renderTabBar()}
         </div>
       ) : (
         <div
           style={{
-            padding: "40px",
-            textAlign: "center",
-            color: "var(--text-muted)",
             background: "var(--bg-card)",
             border: "1px solid var(--border-color)",
             borderRadius: "8px",
+            boxShadow: "var(--shadow-card)",
+            overflow: "hidden",
             marginBottom: cleanQuery ? "24px" : "0",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          {loading
-            ? "Fetching records..."
-            : "No records loaded. Click Reload Tab above."}
+          <div
+            style={{
+              padding: "40px",
+              textAlign: "center",
+              color: "var(--text-muted)",
+            }}
+          >
+            {loading
+              ? "Fetching records..."
+              : "No records loaded. Click Reload Tab above."}
+          </div>
+
+          {/* Fallback Tab Bar if grid is completely empty */}
+          {!loading && renderTabBar()}
         </div>
       )}
 

@@ -567,6 +567,36 @@ async function getNativeCellComments(
   }
 }
 
+
+async function getSpreadsheetTabs(sheets, spreadsheetId, forceRefresh = false) {
+  const cacheKey = `tabs_${spreadsheetId}`;
+
+
+  if (forceRefresh) {
+    cache.del(cacheKey);
+  }
+
+
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey);
+  }
+
+
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(title,hidden)',
+  });
+
+
+  // Only return tabs that are NOT hidden in Google Sheets
+  const tabs = (response.data.sheets || [])
+    .filter(s => !s.properties?.hidden)
+    .map(s => s.properties?.title);
+
+
+  cache.set(cacheKey, tabs, 300); // Cache for 5 minutes
+  return tabs;
+}
 // ---------------------------------------------------------------------------
 // Authentication & Region Discovery Endpoint
 // ---------------------------------------------------------------------------
@@ -634,10 +664,12 @@ app.get("/api/sheet", async (req, res) => {
     const forceRefresh = req.query.refresh === "true";
     const sheets = getSheetsClient(req.headers.authorization);
 
+
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
     );
+
 
     const { values, dropdownOptions, formLinks } =
       await getOrFetchSheetWithValidation(
@@ -648,7 +680,12 @@ app.get("/api/sheet", async (req, res) => {
         forceRefresh,
       );
 
-    res.json({ values, dropdownOptions, formLinks, region: targetRegion });
+
+    // Fetch visible tabs metadata
+    const tabs = await getSpreadsheetTabs(sheets, spreadsheetId, forceRefresh);
+
+
+    res.json({ values, dropdownOptions, formLinks, region: targetRegion, tabs });
   } catch (error) {
     console.error(
       "Error fetching sheet:",

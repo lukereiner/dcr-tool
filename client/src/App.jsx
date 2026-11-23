@@ -45,7 +45,6 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
   const [loginError, setLoginError] = useState("");
 
   const login = useGoogleLogin({
-    // UPDATE: Changed drive.readonly to drive.file
     scope:
       "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
     prompt: "select_account",
@@ -90,9 +89,7 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
           boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
         }}
       >
-        <h2 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>
-          DCR Portal
-        </h2>
+        <h2 style={{ margin: "0 0 12px 0", color: "#1a73e8" }}>DCR Portal</h2>
         <p
           style={{
             color: "#5f6368",
@@ -142,10 +139,10 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             login();
           }}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '5px',
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "5px",
             padding: "12px 24px",
             background: "#1a73e8",
             color: "#fff",
@@ -182,7 +179,6 @@ function NavigationBar({
     { label: "Master", path: "/" },
     { label: "Coordinator", path: "/coordinator" },
     { label: "Sheet Data", path: "/data" },
-    // { label: "Pole Transfers", path: "/pole-transfers" },
   ];
 
   const headerTitle = activeRegion
@@ -209,7 +205,6 @@ function NavigationBar({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "28px" }}>
-          {/* Dynamic Region Brand */}
           <div
             style={{
               fontWeight: 700,
@@ -221,7 +216,6 @@ function NavigationBar({
             {headerTitle}
           </div>
 
-          {/* Multi-Region Dropdown Switcher (Only if user has access to > 1 region) */}
           {allowedRegions && allowedRegions.length > 1 && (
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <select
@@ -275,7 +269,6 @@ function NavigationBar({
           </nav>
         </div>
 
-        {/* Action Cluster */}
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <button
             onClick={onToggleTheme}
@@ -316,8 +309,12 @@ function AppContent() {
   });
 
   const [sessionExpired, setSessionExpired] = useState(false);
+
+  // Active tab in Sheet Data (persists across route navigation)
   const [tabName, setTabName] = useState("Cable Replacement");
-  const [sheetData, setSheetData] = useState([]);
+  // Per-tab cached sheet rows so Coordinator ("Cable Replacement") and Sheet Data remain independent
+  const [sheetDataByTab, setSheetDataByTab] = useState({});
+  const [availableTabs, setAvailableTabs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
 
@@ -341,7 +338,8 @@ function AppContent() {
     setAllowedRegions([]);
     setActiveRegion(null);
     setUserProfile(null);
-    setSheetData([]);
+    setSheetDataByTab({});
+    setAvailableTabs([]);
     setSessionExpired(dueToExpiry);
   };
 
@@ -369,7 +367,6 @@ function AppContent() {
       setUserProfile({ email: data.email, role: data.role });
       setAllowedRegions(data.allowedRegions || []);
 
-      // Check saved region in localStorage; fallback to the first region in the list
       const savedRegionId = localStorage.getItem("dcr_active_region_id");
       const matchedSaved = (data.allowedRegions || []).find(
         (r) => r.id === savedRegionId,
@@ -392,39 +389,63 @@ function AppContent() {
     }
   }, [accessToken, fetchUserConfig]);
 
-  // Fetch sheet data for the active region
-  const fetchSheet = async (forceRefresh = false) => {
-    if (!accessToken || !activeRegion) return;
-    setLoading(true);
-    try {
-      const url = `/api/sheet?tab=${encodeURIComponent(tabName)}&region=${encodeURIComponent(activeRegion.id)}${forceRefresh ? "&refresh=true" : ""}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+  // Fetch sheet data for a specific tab in the active region
+  const fetchSheet = useCallback(
+    async (forceRefresh = false, targetTab = tabName) => {
+      if (!accessToken || !activeRegion || !targetTab) return;
+      setLoading(true);
+      try {
+        const url = `/api/sheet?tab=${encodeURIComponent(targetTab)}&region=${encodeURIComponent(activeRegion.id)}${forceRefresh ? "&refresh=true" : ""}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
 
-      if (res.status === 401) {
-        logout(true);
-        return;
+        if (res.status === 401) {
+          logout(true);
+          return;
+        }
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        setSheetDataByTab((prev) => ({
+          ...prev,
+          [targetTab]: data.values || [],
+        }));
+
+        if (data.tabs) {
+          setAvailableTabs(data.tabs);
+          if (!data.tabs.includes(targetTab) && targetTab !== "Cable Replacement") {
+            setTabName("Cable Replacement");
+          }
+        }
+        if (data.dropdownOptions) {
+          setDropdownOptions(data.dropdownOptions);
+        }
+      } catch (err) {
+        showToast(`Failed to load sheet: ${err.message}`, "error");
+      } finally {
+        setLoading(false);
       }
+    },
+    [accessToken, activeRegion, tabName, showToast],
+  );
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-
-      setSheetData(data.values || []);
-      if (data.dropdownOptions) {
-        setDropdownOptions(data.dropdownOptions);
-      }
-    } catch (err) {
-      showToast(`Failed to load sheet: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Re-fetch data whenever activeRegion or tabName changes
+  // Load "Cable Replacement" (for Coordinator) and active Sheet Data tab on region/auth change
   useEffect(() => {
-    if (accessToken && activeRegion) {
-      fetchSheet(false);
+    if (!accessToken || !activeRegion) return;
+
+    fetchSheet(false, "Cable Replacement");
+    if (tabName !== "Cable Replacement") {
+      fetchSheet(false, tabName);
+    }
+  }, [accessToken, activeRegion?.id]);
+
+  // Lazy-load any newly selected tab in Sheet Data if not yet cached in memory
+  useEffect(() => {
+    if (!accessToken || !activeRegion) return;
+    if (!sheetDataByTab[tabName]) {
+      fetchSheet(false, tabName);
     }
   }, [accessToken, activeRegion?.id, tabName]);
 
@@ -433,26 +454,34 @@ function AppContent() {
     if (nextRegion) {
       setActiveRegion(nextRegion);
       localStorage.setItem("dcr_active_region_id", nextRegion.id);
-      setSheetData([]); // Clear previous region's data from memory
+      setSheetDataByTab({});
+      setAvailableTabs([]);
     }
   };
 
+  // Top nav Refresh button only refreshes the active view/tab being displayed
   const handleGlobalRefresh = (forceRefresh = true) => {
     if (window.location.pathname.startsWith("/dcr/")) {
       setRefreshSignal((prev) => prev + 1);
+    } else if (window.location.pathname === "/data") {
+      fetchSheet(forceRefresh, tabName);
     } else {
-      fetchSheet(forceRefresh);
+      fetchSheet(forceRefresh, "Cable Replacement");
     }
   };
 
   const handleStatusUpdated = (sheetRowNumber, colIndex, newValue) => {
-    setSheetData((prevData) => {
-      if (!prevData || prevData.length <= sheetRowNumber - 1) return prevData;
-      const updated = prevData.map((row) => [...row]);
+    setSheetDataByTab((prev) => {
+      const mainRows = prev["Cable Replacement"];
+      if (!mainRows || mainRows.length <= sheetRowNumber - 1) return prev;
+      const updated = mainRows.map((row) => [...row]);
       if (updated[sheetRowNumber - 1]) {
         updated[sheetRowNumber - 1][colIndex] = newValue;
       }
-      return updated;
+      return {
+        ...prev,
+        "Cable Replacement": updated,
+      };
     });
   };
 
@@ -468,6 +497,19 @@ function AppContent() {
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
+
+  const coordinatorSheetData = sheetDataByTab["Cable Replacement"] || [];
+  const activeTabSheetData = sheetDataByTab[tabName] || [];
+
+  const handleSetActiveTabSheetData = useCallback(
+    (updatedRows) => {
+      setSheetDataByTab((prev) => ({
+        ...prev,
+        [tabName]: updatedRows,
+      }));
+    },
+    [tabName],
+  );
 
   return (
     <AuthContext.Provider
@@ -533,7 +575,7 @@ function AppContent() {
                   path="/coordinator"
                   element={
                     <Coordinator
-                      sheetData={sheetData}
+                      sheetData={coordinatorSheetData}
                       onRefresh={handleGlobalRefresh}
                       loading={loading}
                       accessToken={accessToken}
@@ -547,10 +589,11 @@ function AppContent() {
                   path="/data"
                   element={
                     <Data
+                      availableTabs={availableTabs}
                       tabName={tabName}
                       setTabName={setTabName}
-                      sheetData={sheetData}
-                      setSheetData={setSheetData}
+                      sheetData={activeTabSheetData}
+                      setSheetData={handleSetActiveTabSheetData}
                       searchQuery={searchQuery}
                       setSearchQuery={setSearchQuery}
                       page={page}
