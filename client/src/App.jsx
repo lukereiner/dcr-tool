@@ -4,6 +4,7 @@ import {
   Routes,
   Route,
   Link,
+  Navigate,
   useLocation,
 } from "react-router-dom";
 import { useGoogleLogin } from "@react-oauth/google";
@@ -13,6 +14,7 @@ import DCRReview from "./pages/DCRReview";
 import RefreshButton from "./components/RefreshButton";
 import { ToastProvider, useToast } from "./context/ToastContext";
 import { FaGoogle } from "react-icons/fa";
+import Master from "./pages/Master";
 
 export const AuthContext = createContext(null);
 
@@ -172,11 +174,12 @@ function NavigationBar({
   activeRegion,
   allowedRegions,
   onRegionChange,
+  isDirector,
 }) {
   const location = useLocation();
 
   const navItems = [
-    { label: "Master", path: "/" },
+    ...(isDirector ? [{ label: "Master", path: "/" }] : []),
     { label: "Coordinator", path: "/coordinator" },
     { label: "Sheet Data", path: "/data" },
   ];
@@ -461,7 +464,10 @@ function AppContent() {
 
   // Top nav Refresh button only refreshes the active view/tab being displayed
   const handleGlobalRefresh = (forceRefresh = true) => {
-    if (window.location.pathname.startsWith("/dcr/")) {
+    if (
+      window.location.pathname === "/" ||
+      window.location.pathname.startsWith("/dcr/")
+    ) {
       setRefreshSignal((prev) => prev + 1);
     } else if (window.location.pathname === "/data") {
       fetchSheet(forceRefresh, tabName);
@@ -511,6 +517,11 @@ function AppContent() {
     [tabName],
   );
 
+  const isDirector =
+    String(userProfile?.role || "")
+      .trim()
+      .toUpperCase() === "DIRECTOR";
+
   return (
     <AuthContext.Provider
       value={{
@@ -545,6 +556,7 @@ function AppContent() {
               activeRegion={activeRegion}
               allowedRegions={allowedRegions}
               onRegionChange={handleRegionChange}
+              isDirector={isDirector}
             />
 
             <main style={{ padding: "0 24px 40px 24px" }}>
@@ -552,23 +564,22 @@ function AppContent() {
                 <Route
                   path="/"
                   element={
-                    <div
-                      style={{
-                        maxWidth: "1280px",
-                        margin: "0 auto",
-                        background: "#fff",
-                        padding: "32px",
-                        borderRadius: "8px",
-                        border: "1px solid #ddd",
-                      }}
-                    >
-                      <h3>Master</h3>
-                      <p style={{ color: "#666" }}>
-                        Active Region:{" "}
-                        <strong>{activeRegion?.name || "None"}</strong>.
-                        Business logic overview coming soon.
-                      </p>
-                    </div>
+                    !userProfile ? (
+                      <div
+                        style={{
+                          maxWidth: "1280px",
+                          margin: "0 auto",
+                          padding: "32px",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        Loading permissions...
+                      </div>
+                    ) : isDirector ? (
+                      <Master />
+                    ) : (
+                      <Navigate to="/coordinator" replace />
+                    )
                   }
                 />
                 <Route

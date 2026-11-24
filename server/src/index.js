@@ -1905,6 +1905,331 @@ app.get("/api/drive/file/:fileId", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Master Dashboard Endpoints (Summary, System Ext Data, Mileage Table)
+// ---------------------------------------------------------------------------
+
+async function verifyMasterUser(req, sheets) {
+  const userEmail = await getUserEmailFromAuth(req.headers.authorization);
+  const { users } = await getMasterConfig(sheets, false);
+  const userProfile = users.find((u) => u.email === userEmail);
+
+
+  if (!userProfile) {
+    const error = new Error(
+      `Account "${userEmail}" is not authorized in UserConfig.`,
+    );
+    error.statusCode = 403;
+    throw error;
+  }
+
+
+  const userRole = String(userProfile.role || "")
+    .trim()
+    .toUpperCase();
+  if (userRole !== "DIRECTOR") {
+    const error = new Error(
+      "Access denied. Master sheet is restricted to Director role.",
+    );
+    error.statusCode = 403;
+    throw error;
+  }
+
+
+  return { userEmail, userProfile };
+}
+
+async function extractDropdownOptionsFromValidation(sheets, cellData) {
+  const dv = cellData?.dataValidation;
+  if (!dv || !dv.condition) return [];
+
+  const { type, values = [] } = dv.condition;
+
+  if (type === "ONE_OF_LIST") {
+    return values
+      .map((v) => String(v?.userEnteredValue || "").trim())
+      .filter(Boolean);
+  }
+
+  if (type === "ONE_OF_RANGE") {
+    const rawRange = String(values[0]?.userEnteredValue || "")
+      .replace(/^=/, "")
+      .trim();
+    if (!rawRange) return [];
+
+    try {
+      const rangeRes = await sheets.spreadsheets.values.get({
+        spreadsheetId: MASTER_SPREADSHEET_ID,
+        range: rawRange,
+      });
+      const flat = (rangeRes.data.values || [])
+        .flat()
+        .map((val) => String(val || "").trim())
+        .filter(Boolean);
+      return Array.from(new Set(flat));
+    } catch (err) {
+      console.warn(
+        `[MASTER DROPDOWN] Could not resolve range "${rawRange}":`,
+        err.message,
+      );
+      return [];
+    }
+  }
+
+  return [];
+}
+
+async function resolveMasterDropdownOptions(sheets) {
+  try {
+    const metaRes = await sheets.spreadsheets.get({
+      spreadsheetId: MASTER_SPREADSHEET_ID,
+      ranges: [
+        "'Summary'!C2",
+        "'System Ext Data'!B2",
+        "'System Ext Data'!B4",
+      ],
+      fields: "sheets(properties.title,data.rowData.values.dataValidation)",
+    });
+
+    const sheetList = metaRes.data.sheets || [];
+    const summarySheet = sheetList.find(
+      (s) => s.properties?.title === "Summary",
+    );
+    const sysExtSheet = sheetList.find(
+      (s) => s.properties?.title === "System Ext Data",
+    );
+
+    const summaryC2Cell = summarySheet?.data?.[0]?.rowData?.[0]?.values?.[0];
+    const sysExtB2Cell = sysExtSheet?.data?.[0]?.rowData?.[0]?.values?.[0];
+    const sysExtB4Cell = sysExtSheet?.data?.[1]?.rowData?.[0]?.values?.[0];
+
+    const [summaryRegions, sysExtRegions, sysExtSystems] = await Promise.all([
+      extractDropdownOptionsFromValidation(sheets, summaryC2Cell),
+      extractDropdownOptionsFromValidation(sheets, sysExtB2Cell),
+      extractDropdownOptionsFromValidation(sheets, sysExtB4Cell),
+    ]);
+
+    return {
+      summaryRegions,
+      sysExtRegions,
+      sysExtSystems,
+    };
+  } catch (err) {
+    console.warn(
+      "[MASTER DROPDOWN] Failed to fetch data validation metadata:",
+      err.message,
+    );
+    return {
+      summaryRegions: [],
+      sysExtRegions: [],
+      sysExtSystems: [],
+    };
+  }
+}
+
+app.get("/api/master", async (req, res) => {
+  try {
+    const sheets = getSheetsClient(req.headers.authorization);
+    await verifyMasterUser(req, sheets);
+
+    const [batchRes, dropdowns] = await Promise.all([
+      sheets.spreadsheets.values.batchGet({
+        spreadsheetId: MASTER_SPREADSHEET_ID,
+        ranges: [
+          "'Summary'!C1:C2",
+          "'Summary'!B4:H43",
+          "'System Ext Data'!B2:B4",
+          "'System Ext Data'!C3:U42",
+          "'Mileage Table'!A2:I119",
+          "'Mileage Table'!D122:I122",
+        ],
+      }),
+      resolveMasterDropdownOptions(sheets),
+    ]);
+
+    const ranges = batchRes.data.valueRanges || [];
+    const summaryControls = ranges[0]?.values || [];
+    const summaryRows = ranges[1]?.values || [];
+    const sysExtControls = ranges[2]?.values || [];
+    const sysExtRows = ranges[3]?.values || [];
+    const mileageRows = ranges[4]?.values || [];
+    const mileageTotalsRow = ranges[5]?.values?.[0] || [];
+
+    const summaryYear = String(summaryControls[0]?.[0] || "").trim();
+    const summaryRegion = String(summaryControls[1]?.[0] || "").trim();
+
+    const sysExtRegion = String(sysExtControls[0]?.[0] || "").trim();
+    const sysExtSystem = String(sysExtControls[2]?.[0] || "").trim();
+
+    res.json({
+      summary: {
+        year: summaryYear,
+        region: summaryRegion,
+        regionOptions: dropdowns.summaryRegions,
+        rows: summaryRows,
+      },
+      systemExt: {
+        region: sysExtRegion,
+        system: sysExtSystem,
+        regionOptions: dropdowns.sysExtRegions,
+        systemOptions: dropdowns.sysExtSystems,
+        rows: sysExtRows,
+      },
+      mileage: {
+        rows: mileageRows,
+        totals: mileageTotalsRow,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Error fetching Master data:",
+      error?.response?.data || error.message,
+    );
+    const status = error.statusCode || error?.response?.status || 500;
+    res.status(status).json({
+      error: error?.response?.data?.error?.message || error.message,
+    });
+  }
+});
+
+app.post("/api/master/control", async (req, res) => {
+  try {
+    const sheets = getSheetsClient(req.headers.authorization);
+    await verifyMasterUser(req, sheets);
+
+    const { tab, cell, value } = req.body;
+    const cleanCell = String(cell || "")
+      .trim()
+      .toUpperCase();
+
+    const allowedControls = {
+      Summary: new Set(["C2"]),
+      "System Ext Data": new Set(["B2", "B4"]),
+    };
+
+    if (!allowedControls[tab] || !allowedControls[tab].has(cleanCell)) {
+      return res.status(400).json({
+        error: `Cell "${tab}!${cleanCell}" is not an allowed Master dropdown control.`,
+      });
+    }
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: MASTER_SPREADSHEET_ID,
+      range: `'${tab}'!${cleanCell}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [[value ?? ""]] },
+    });
+
+    // Brief pause so Google Sheets formulas recalculate before reading back
+    await new Promise((resolve) => setTimeout(resolve, 650));
+
+    if (tab === "Summary") {
+      const [batchRes, dropdowns] = await Promise.all([
+        sheets.spreadsheets.values.batchGet({
+          spreadsheetId: MASTER_SPREADSHEET_ID,
+          ranges: ["'Summary'!C1:C2", "'Summary'!B4:H43"],
+        }),
+        resolveMasterDropdownOptions(sheets),
+      ]);
+
+      const ranges = batchRes.data.valueRanges || [];
+      const controls = ranges[0]?.values || [];
+      const rows = ranges[1]?.values || [];
+
+      return res.json({
+        success: true,
+        summary: {
+          year: String(controls[0]?.[0] || "").trim(),
+          region: String(controls[1]?.[0] || "").trim(),
+          regionOptions: dropdowns.summaryRegions,
+          rows,
+        },
+      });
+    }
+
+    const [batchRes, dropdowns] = await Promise.all([
+      sheets.spreadsheets.values.batchGet({
+        spreadsheetId: MASTER_SPREADSHEET_ID,
+        ranges: ["'System Ext Data'!B2:B4", "'System Ext Data'!C3:U42"],
+      }),
+      resolveMasterDropdownOptions(sheets),
+    ]);
+
+    const ranges = batchRes.data.valueRanges || [];
+    const controls = ranges[0]?.values || [];
+    const rows = ranges[1]?.values || [];
+
+    return res.json({
+      success: true,
+      systemExt: {
+        region: String(controls[0]?.[0] || "").trim(),
+        system: String(controls[2]?.[0] || "").trim(),
+        regionOptions: dropdowns.sysExtRegions,
+        systemOptions: dropdowns.sysExtSystems,
+        rows,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Error updating Master control:",
+      error?.response?.data || error.message,
+    );
+    const status = error.statusCode || error?.response?.status || 500;
+    res.status(status).json({
+      error: error?.response?.data?.error?.message || error.message,
+    });
+  }
+});
+
+app.post("/api/master/mileage", async (req, res) => {
+  try {
+    const sheets = getSheetsClient(req.headers.authorization);
+    await verifyMasterUser(req, sheets);
+
+    const { cell, value } = req.body;
+    const cleanCell = String(cell || "")
+      .trim()
+      .toUpperCase();
+
+    // Only allow edits within data rows A3:I119 (row 2 is headers)
+    if (!/^[A-I]([3-9]|[1-9][0-9]|10[0-9]|11[0-9])$/.test(cleanCell)) {
+      return res.status(400).json({
+        error: `Cell "${cleanCell}" is outside the editable Mileage Table range (A3:I119).`,
+      });
+    }
+
+    const updateRes = await sheets.spreadsheets.values.update({
+      spreadsheetId: MASTER_SPREADSHEET_ID,
+      range: `'Mileage Table'!${cleanCell}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [[value ?? ""]] },
+    });
+
+    // Brief pause so SUM formulas in D122:I122 update
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const totalsRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: MASTER_SPREADSHEET_ID,
+      range: "'Mileage Table'!D122:I122",
+    });
+
+    res.json({
+      success: true,
+      updatedRange: updateRes.data.updatedRange,
+      totals: totalsRes.data.values?.[0] || [],
+    });
+  } catch (error) {
+    console.error(
+      "Error updating Mileage Table cell:",
+      error?.response?.data || error.message,
+    );
+    const status = error.statusCode || error?.response?.status || 500;
+    res.status(status).json({
+      error: error?.response?.data?.error?.message || error.message,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Static Asset Serving
 // ---------------------------------------------------------------------------
 
