@@ -10,6 +10,9 @@ import { useToast } from "../context/ToastContext";
 import MasterSummary from "../components/master/MasterSummary";
 import MasterSystemExt from "../components/master/MasterSystemExt";
 import MasterMileage from "../components/master/MasterMileage";
+import MasterSummaryDashboard from "../components/master/MasterSummaryDashboard";
+import MasterSystemExtDashboard from "../components/master/MasterSystemExtDashboard";
+import MasterMileageDashboard from "../components/master/MasterMileageDashboard";
 import { SelectionSummaryInline } from "../components/master/CellSelectionTools";
 
 const MASTER_TABS = ["Summary", "System Ext Data", "Mileage Table"];
@@ -24,7 +27,24 @@ export default function Master() {
       .trim()
       .toUpperCase() === "DIRECTOR";
 
-  const [activeTab, setActiveTab] = useState("Summary");
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = localStorage.getItem("master_view_mode");
+    return saved === "spreadsheet" ? "spreadsheet" : "dashboard";
+  });
+
+  const [activeTab, setActiveTab] = useState(() => {
+    const saved = localStorage.getItem("master_active_tab");
+    return MASTER_TABS.includes(saved) ? saved : "Summary";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("master_view_mode", viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    localStorage.setItem("master_active_tab", activeTab);
+  }, [activeTab]);
+
   const [loading, setLoading] = useState(true);
   const [isUpdatingControl, setIsUpdatingControl] = useState(false);
 
@@ -44,6 +64,8 @@ export default function Master() {
       system: "",
       regionOptions: [],
       systemOptions: [],
+      startingMileageRow: [],
+      endingMileageRow: [],
       rows: [],
     },
     mileage: { rows: [], totals: [] },
@@ -78,6 +100,8 @@ export default function Master() {
             system: "",
             regionOptions: [],
             systemOptions: [],
+            startingMileageRow: [],
+            endingMileageRow: [],
             rows: [],
           },
           mileage: data.mileage || { rows: [], totals: [] },
@@ -261,11 +285,6 @@ export default function Master() {
           outline: 1px solid rgba(96, 165, 250, 0.6);
         }
 
-        .master-tab-btn:not(.active):hover {
-          background-color: var(--bg-input) !important;
-          color: var(--text-main) !important;
-        }
-
         .master-sticky-cell.master-cell-selected {
           background: linear-gradient(
               rgba(26, 115, 232, 0.16),
@@ -280,6 +299,11 @@ export default function Master() {
             ),
             var(--bg-card) !important;
         }
+
+        .master-tab-btn:not(.active):hover {
+          background-color: var(--bg-input) !important;
+          color: var(--text-main) !important;
+        }
       `}</style>
 
       {/* Main Master Sheet Card */}
@@ -293,7 +317,7 @@ export default function Master() {
           display: "flex",
           flexDirection: "column",
           height: "78vh",
-          minHeight: "520px",
+          minHeight: "540px",
         }}
       >
         {loading ? (
@@ -309,6 +333,22 @@ export default function Master() {
           >
             Loading Master Sheet data...
           </div>
+        ) : viewMode === "dashboard" ? (
+          activeTab === "Summary" ? (
+            <MasterSummaryDashboard
+              summary={masterData.summary}
+              onControlChange={handleControlChange}
+              isUpdating={isUpdatingControl}
+            />
+          ) : activeTab === "System Ext Data" ? (
+            <MasterSystemExtDashboard
+              systemExt={masterData.systemExt}
+              onControlChange={handleControlChange}
+              isUpdating={isUpdatingControl}
+            />
+          ) : (
+            <MasterMileageDashboard mileage={masterData.mileage} />
+          )
         ) : activeTab === "Summary" ? (
           <MasterSummary
             summary={masterData.summary}
@@ -331,7 +371,7 @@ export default function Master() {
           />
         )}
 
-        {/* Google Sheets Style Bottom Tab Bar + Far-Right Selection Stats */}
+        {/* Bottom Tab Bar + View Mode Switcher + Selection Stats */}
         <div
           style={{
             display: "flex",
@@ -343,6 +383,7 @@ export default function Master() {
             flexShrink: 0,
             gap: "12px",
             minHeight: "41px",
+            flexWrap: "wrap",
           }}
         >
           {/* Left: Sheet Tabs */}
@@ -394,13 +435,66 @@ export default function Master() {
             })}
           </div>
 
-          {/* Right: Highlight-to-Sum Stats */}
-          {selectionInfo.stats && (
-            <SelectionSummaryInline
-              stats={selectionInfo.stats}
-              onClear={selectionInfo.clearSelection}
-            />
-          )}
+          {/* Right: Selection Stats (Spreadsheet mode) + Dashboard/Spreadsheet Toggle */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginLeft: "auto",
+              padding: "4px 0",
+            }}
+          >
+            {viewMode === "spreadsheet" && selectionInfo.stats && (
+              <SelectionSummaryInline
+                stats={selectionInfo.stats}
+                onClear={selectionInfo.clearSelection}
+              />
+            )}
+
+            <div
+              style={{
+                display: "inline-flex",
+                borderRadius: "6px",
+                border: "1px solid var(--border-color)",
+                background: "var(--bg-card)",
+                overflow: "hidden",
+              }}
+            >
+              {[
+                { id: "dashboard", label: "Dashboard" },
+                { id: "spreadsheet", label: "Spreadsheet" },
+              ].map((mode) => {
+                const isSelected = viewMode === mode.id;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => {
+                      if (!isSelected) {
+                        setViewMode(mode.id);
+                        setSelectionInfo({ stats: null, clearSelection: null });
+                      }
+                    }}
+                    style={{
+                      padding: "4px 12px",
+                      border: "none",
+                      background: isSelected
+                        ? "var(--btn-primary-bg, #1a73e8)"
+                        : "transparent",
+                      color: isSelected ? "#ffffff" : "var(--text-muted)",
+                      fontSize: "12px",
+                      fontWeight: isSelected ? 600 : 500,
+                      cursor: "pointer",
+                      transition: "all 0.12s ease",
+                    }}
+                  >
+                    {mode.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
     </div>

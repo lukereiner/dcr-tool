@@ -2038,7 +2038,7 @@ app.get("/api/master", async (req, res) => {
           "'Summary'!C1:C2",
           "'Summary'!B4:H43",
           "'System Ext Data'!B2:B4",
-          "'System Ext Data'!C3:U42",
+          "'System Ext Data'!C1:U42",
           "'Mileage Table'!A2:I119",
           "'Mileage Table'!D122:I122",
         ],
@@ -2046,19 +2046,23 @@ app.get("/api/master", async (req, res) => {
       resolveMasterDropdownOptions(sheets),
     ]);
 
+
     const ranges = batchRes.data.valueRanges || [];
     const summaryControls = ranges[0]?.values || [];
     const summaryRows = ranges[1]?.values || [];
     const sysExtControls = ranges[2]?.values || [];
-    const sysExtRows = ranges[3]?.values || [];
+    const sysExtAllRows = ranges[3]?.values || [];
     const mileageRows = ranges[4]?.values || [];
     const mileageTotalsRow = ranges[5]?.values?.[0] || [];
+
 
     const summaryYear = String(summaryControls[0]?.[0] || "").trim();
     const summaryRegion = String(summaryControls[1]?.[0] || "").trim();
 
+
     const sysExtRegion = String(sysExtControls[0]?.[0] || "").trim();
     const sysExtSystem = String(sysExtControls[2]?.[0] || "").trim();
+
 
     res.json({
       summary: {
@@ -2072,7 +2076,9 @@ app.get("/api/master", async (req, res) => {
         system: sysExtSystem,
         regionOptions: dropdowns.sysExtRegions,
         systemOptions: dropdowns.sysExtSystems,
-        rows: sysExtRows,
+        startingMileageRow: sysExtAllRows[0] || [],
+        endingMileageRow: sysExtAllRows[1] || [],
+        rows: sysExtAllRows.slice(2),
       },
       mileage: {
         rows: mileageRows,
@@ -2149,14 +2155,16 @@ app.post("/api/master/control", async (req, res) => {
     const [batchRes, dropdowns] = await Promise.all([
       sheets.spreadsheets.values.batchGet({
         spreadsheetId: MASTER_SPREADSHEET_ID,
-        ranges: ["'System Ext Data'!B2:B4", "'System Ext Data'!C3:U42"],
+        ranges: ["'System Ext Data'!B2:B4", "'System Ext Data'!C1:U42"],
       }),
       resolveMasterDropdownOptions(sheets),
     ]);
 
+
     const ranges = batchRes.data.valueRanges || [];
     const controls = ranges[0]?.values || [];
-    const rows = ranges[1]?.values || [];
+    const allRows = ranges[1]?.values || [];
+
 
     return res.json({
       success: true,
@@ -2165,7 +2173,9 @@ app.post("/api/master/control", async (req, res) => {
         system: String(controls[2]?.[0] || "").trim(),
         regionOptions: dropdowns.sysExtRegions,
         systemOptions: dropdowns.sysExtSystems,
-        rows,
+        startingMileageRow: allRows[0] || [],
+        endingMileageRow: allRows[1] || [],
+        rows: allRows.slice(2),
       },
     });
   } catch (error) {
