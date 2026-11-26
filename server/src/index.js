@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import crypto from "crypto";
 import { google } from "googleapis";
 import dotenv from "dotenv";
 import NodeCache from "node-cache";
@@ -16,6 +17,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const SESSION_COOKIE_NAME = "dcr_session";
+const INACTIVITY_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours sliding inactivity timeout
+const REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh access token 5 min before expiry
+const GOOGLE_CLIENT_ID =
+  process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const SESSION_SECRET = process.env.SESSION_SECRET || "";
+
 const upload = multer({
   storage: multer.memoryStorage(),
 });
@@ -23,7 +32,12 @@ const upload = multer({
 const cache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 const pendingRequests = new Map();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  }),
+);
 app.use(express.json());
 
 const MASTER_SPREADSHEET_ID = "1TrsDRv-aoCxPLzCp0ma6JlwamJPT13JuKuIda-5Uvdg";
@@ -53,55 +67,227 @@ const googleRetryConfig = {
   },
 };
 
-const getSheetsClient = (authHeader) => {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
+function getEncryptionKey() {
+  if (!SESSION_SECRET) {
+    throw new Error("Missing SESSION_SECRET in server environment.");
   }
-  const token = authHeader.split(" ")[1];
-  const oauth2Client = new google.auth.OAuth2();
-  oauth2Client.setCredentials({ access_token: token });
+  return crypto.createHash("sha256").update(SESSION_SECRET).digest();
+}
 
-  return google.sheets({
+function encryptSessionPayload(payload) {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const json = JSON.stringify(payload);
+  const encrypted = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString("base64url")}.${authTag.toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+function decryptSessionPayload(tokenStr) {
+  if (!tokenStr || typeof tokenStr !== "string") return null;
+  const parts = tokenStr.split(".");
+  if (parts.length !== 3) return null;
+
+  try {
+    const key = getEncryptionKey();
+    const iv = Buffer.from(parts[0], "base64url");
+    const authTag = Buffer.from(parts[1], "base64url");
+    const encrypted = Buffer.from(parts[2], "base64url");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]);
+    return JSON.parse(decrypted.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const cookies = {};
+  if (!header) return cookies;
+
+  header.split(";").forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx === -1) return;
+    const name = pair.slice(0, idx).trim();
+    const val = decodeURIComponent(pair.slice(idx + 1).trim());
+    cookies[name] = val;
+  });
+
+  return cookies;
+}
+
+function isHttpsRequest(req) {
+  if (req.secure) return true;
+  const proto = String(req.headers["x-forwarded-proto"] || "").toLowerCase();
+  return proto === "https";
+}
+
+function setSessionCookie(req, res, sessionData) {
+  const encryptedValue = encryptSessionPayload(sessionData);
+  const cookieParts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(encryptedValue)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${Math.floor(INACTIVITY_WINDOW_MS / 1000)}`,
+  ];
+  if (isHttpsRequest(req)) {
+    cookieParts.push("Secure");
+  }
+  res.setHeader("Set-Cookie", cookieParts.join("; "));
+}
+
+function clearSessionCookie(req, res) {
+  const cookieParts = [
+    `${SESSION_COOKIE_NAME}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=0",
+  ];
+  if (isHttpsRequest(req)) {
+    cookieParts.push("Secure");
+  }
+  res.setHeader("Set-Cookie", cookieParts.join("; "));
+}
+
+function createOAuthClient() {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    throw new Error(
+      "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in server environment.",
+    );
+  }
+  return new google.auth.OAuth2(
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    "postmessage",
+  );
+}
+
+// Validates the 2-hour sliding inactivity window and refreshes access_token if needed
+async function resolveActiveSession(req, res) {
+  const cookies = parseCookies(req);
+  const rawCookie = cookies[SESSION_COOKIE_NAME];
+  const session = decryptSessionPayload(rawCookie);
+
+  if (!session || !session.access_token) {
+    const err = new Error("Authentication required. Please sign in.");
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const now = Date.now();
+  const lastActive = Number(session.lastActive || 0);
+
+  if (!lastActive || now - lastActive > INACTIVITY_WINDOW_MS) {
+    clearSessionCookie(req, res);
+    const err = new Error(
+      "Session expired due to 2 hours of inactivity. Please sign in again.",
+    );
+    err.statusCode = 401;
+    throw err;
+  }
+
+  const oauth2Client = createOAuthClient();
+  oauth2Client.setCredentials({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expiry_date: session.expiry_date,
+  });
+
+  let updatedAccessToken = session.access_token;
+  let updatedExpiryDate = session.expiry_date || now + 3600 * 1000;
+  let needsCookieUpdate = true;
+
+  const isExpiringSoon =
+    !session.expiry_date ||
+    Number(session.expiry_date) - now <= REFRESH_BUFFER_MS;
+
+  if (isExpiringSoon && session.refresh_token) {
+    try {
+      const { credentials } = await oauth2Client.refreshAccessToken();
+      if (credentials.access_token) {
+        updatedAccessToken = credentials.access_token;
+        oauth2Client.setCredentials({
+          ...credentials,
+          refresh_token: credentials.refresh_token || session.refresh_token,
+        });
+      }
+      if (credentials.expiry_date) {
+        updatedExpiryDate = credentials.expiry_date;
+      }
+    } catch (refreshErr) {
+      console.warn(
+        "[AUTH REFRESH] Failed to refresh Google access token:",
+        refreshErr?.message || refreshErr,
+      );
+      if (session.expiry_date && now >= Number(session.expiry_date)) {
+        clearSessionCookie(req, res);
+        const err = new Error(
+          "Google session expired. Please sign in again.",
+        );
+        err.statusCode = 401;
+        throw err;
+      }
+    }
+  }
+
+  const nextSession = {
+    ...session,
+    access_token: updatedAccessToken,
+    expiry_date: updatedExpiryDate,
+    lastActive: now,
+  };
+
+  if (needsCookieUpdate && res) {
+    setSessionCookie(req, res, nextSession);
+  }
+
+  return {
+    oauth2Client,
+    accessToken: updatedAccessToken,
+    email: session.email || "",
+  };
+}
+
+const getSheetsClientFromSession = (oauth2Client) =>
+  google.sheets({
     version: "v4",
     auth: oauth2Client,
     retryConfig: googleRetryConfig,
   });
-};
 
-const getDriveClient = (authHeader) => {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
-  }
-  const token = authHeader.split(" ")[1];
-  const oauth2Client = new google.auth.OAuth2();
-  oauth2Client.setCredentials({ access_token: token });
-
-  return google.drive({
+const getDriveClientFromSession = (oauth2Client) =>
+  google.drive({
     version: "v3",
     auth: oauth2Client,
     retryConfig: googleRetryConfig,
   });
-};
 
-async function getUserEmailFromAuth(authHeader) {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    throw new Error("Missing or malformed Authorization header");
+async function getUserEmailFromSession(sessionCtx) {
+  if (sessionCtx.email) {
+    return sessionCtx.email.toLowerCase().trim();
   }
-  const token = authHeader.split(" ")[1];
-  const cacheKey = `user_email_${token.substring(0, 24)}`;
 
+  const cacheKey = `user_email_${sessionCtx.accessToken.substring(0, 24)}`;
   if (cache.has(cacheKey)) {
     return cache.get(cacheKey);
   }
 
-  const oauth2Client = new google.auth.OAuth2();
-  oauth2Client.setCredentials({ access_token: token });
-  const tokenInfo = await oauth2Client.getTokenInfo(token);
+  const tokenInfo = await sessionCtx.oauth2Client.getTokenInfo(
+    sessionCtx.accessToken,
+  );
   const email = (tokenInfo.email || "").toLowerCase().trim();
 
   if (!email) {
     throw new Error(
-      "Unable to extract verified email from Google authorization token.",
+      "Unable to extract verified email from Google authorization session.",
     );
   }
 
@@ -213,8 +399,8 @@ async function getMasterConfig(sheets, forceRefresh = false) {
   return bundle;
 }
 
-async function resolveRegionSpreadsheet(req, sheets) {
-  const userEmail = await getUserEmailFromAuth(req.headers.authorization);
+async function resolveRegionSpreadsheet(req, sheets, sessionCtx) {
+  const userEmail = await getUserEmailFromSession(sessionCtx);
   const { regions, users } = await getMasterConfig(sheets, false);
 
   const userProfile = users.find((u) => u.email === userEmail);
@@ -249,7 +435,7 @@ async function resolveRegionSpreadsheet(req, sheets) {
     throw error;
   }
 
-  const requestedId = (req.query.region || req.body.region || "")
+  const requestedId = (req.query.region || req.body?.region || "")
     .trim()
     .toLowerCase();
 
@@ -567,44 +753,96 @@ async function getNativeCellComments(
   }
 }
 
-
 async function getSpreadsheetTabs(sheets, spreadsheetId, forceRefresh = false) {
   const cacheKey = `tabs_${spreadsheetId}`;
-
 
   if (forceRefresh) {
     cache.del(cacheKey);
   }
 
-
   if (cache.has(cacheKey)) {
     return cache.get(cacheKey);
   }
 
-
   const response = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: 'sheets.properties(title,hidden)',
+    fields: "sheets.properties(title,hidden)",
   });
 
-
-  // Only return tabs that are NOT hidden in Google Sheets
   const tabs = (response.data.sheets || [])
-    .filter(s => !s.properties?.hidden)
-    .map(s => s.properties?.title);
+    .filter((s) => !s.properties?.hidden)
+    .map((s) => s.properties?.title);
 
-
-  cache.set(cacheKey, tabs, 300); // Cache for 5 minutes
+  cache.set(cacheKey, tabs, 300);
   return tabs;
 }
+
 // ---------------------------------------------------------------------------
-// Authentication & Region Discovery Endpoint
+// Authentication & Region Discovery Endpoints
 // ---------------------------------------------------------------------------
+
+app.post("/api/auth/google", async (req, res) => {
+  try {
+    const { code } = req.body || {};
+    if (!code) {
+      return res
+        .status(400)
+        .json({ error: "Missing authorization code from Google sign-in." });
+    }
+
+    const oauth2Client = createOAuthClient();
+    const { tokens } = await oauth2Client.getToken(code);
+
+    if (!tokens.access_token) {
+      return res
+        .status(400)
+        .json({ error: "Google did not return an access token." });
+    }
+
+    oauth2Client.setCredentials(tokens);
+    let email = "";
+    try {
+      const tokenInfo = await oauth2Client.getTokenInfo(tokens.access_token);
+      email = (tokenInfo.email || "").toLowerCase().trim();
+    } catch {
+      // Fallback to getTokenInfo later if needed
+    }
+
+    const now = Date.now();
+    setSessionCookie(req, res, {
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token || "",
+      expiry_date: tokens.expiry_date || now + 3600 * 1000,
+      email,
+      lastActive: now,
+    });
+
+    res.json({ authenticated: true, email });
+  } catch (error) {
+    console.error(
+      "Error exchanging Google auth code:",
+      error?.response?.data || error.message,
+    );
+    res.status(401).json({
+      error:
+        error?.response?.data?.error_description ||
+        error?.response?.data?.error ||
+        error.message ||
+        "Google sign-in failed.",
+    });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  clearSessionCookie(req, res);
+  res.json({ authenticated: false });
+});
 
 app.get("/api/auth/me", async (req, res) => {
   try {
-    const sheets = getSheetsClient(req.headers.authorization);
-    const userEmail = await getUserEmailFromAuth(req.headers.authorization);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const userEmail = await getUserEmailFromSession(sessionCtx);
     const { regions, users } = await getMasterConfig(sheets, false);
 
     const userProfile = users.find((u) => u.email === userEmail);
@@ -662,14 +900,14 @@ app.get("/api/sheet", async (req, res) => {
   try {
     const tabName = req.query.tab || MAIN_TAB;
     const forceRefresh = req.query.refresh === "true";
-    const sheets = getSheetsClient(req.headers.authorization);
-
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
 
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
-
 
     const { values, dropdownOptions, formLinks } =
       await getOrFetchSheetWithValidation(
@@ -680,10 +918,7 @@ app.get("/api/sheet", async (req, res) => {
         forceRefresh,
       );
 
-
-    // Fetch visible tabs metadata
     const tabs = await getSpreadsheetTabs(sheets, spreadsheetId, forceRefresh);
-
 
     res.json({ values, dropdownOptions, formLinks, region: targetRegion, tabs });
   } catch (error) {
@@ -700,7 +935,8 @@ app.get("/api/sheet", async (req, res) => {
 
 app.post("/api/sheet/cell", async (req, res) => {
   try {
-    const sheets = getSheetsClient(req.headers.authorization);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
     const { tabName = MAIN_TAB, cell, value } = req.body;
 
     if (!cell) {
@@ -712,6 +948,7 @@ app.post("/api/sheet/cell", async (req, res) => {
     const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     const response = await sheets.spreadsheets.values.update({
@@ -740,19 +977,18 @@ app.post("/api/sheet/cell", async (req, res) => {
 // ---------------------------------------------------------------------------
 
 const FORM_RESPONSE_DROPDOWN_COLS = new Set(["E", "H", "I", "J", "Q", "R"]);
-const FORM_RESPONSE_HIDDEN_COLS = new Set([19, 20, 21]); // T, U, V on DCR Form Responses
+const FORM_RESPONSE_HIDDEN_COLS = new Set([19, 20, 21]);
 
 app.get("/api/dcr/:dcrId", async (req, res) => {
   try {
     const { dcrId } = req.params;
     const forceRefresh = req.query.refresh === "true";
-    const sheets = getSheetsClient(req.headers.authorization);
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
 
     const { targetRegion, spreadsheetId, userProfile } =
-      await resolveRegionSpreadsheet(req, sheets);
+      await resolveRegionSpreadsheet(req, sheets, sessionCtx);
 
     const userRole = String(userProfile?.role || "")
       .trim()
@@ -781,7 +1017,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
     }
 
     const headers = rows[0];
-    const DCR_COL_INDEX = 24; // Column Y
+    const DCR_COL_INDEX = 24;
 
     let foundIndex = -1;
     for (let i = 1; i < rows.length; i++) {
@@ -801,7 +1037,6 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
     const targetRow = rows[foundIndex];
     const sheetRowNumber = foundIndex + 1;
 
-    // Independently search 'DCR Form Responses' Column Y for the matching DCR ID row
     let formRespFoundIndex = -1;
     if (formResponseRows && formResponseRows.length > 1) {
       for (let i = 1; i < formResponseRows.length; i++) {
@@ -813,8 +1048,7 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       }
     }
 
-    const formRespHeaders =
-      (formResponseRows && formResponseRows[0]) || headers;
+    const formRespHeaders = (formResponseRows && formResponseRows[0]) || headers;
     const formRespTargetRow =
       formRespFoundIndex !== -1
         ? formResponseRows[formRespFoundIndex]
@@ -838,18 +1072,15 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
       isReadOnly: idx >= 2 && idx <= 24,
     }));
 
-    // Map 'DCR Form Responses' (Cols B..W -> Cable Replacement Cols C..X, plus Y -> Y)
-    // Titles, column letters, and comments come from 'Cable Replacement' (mainIdx),
-    // while field values and write updates map to 'DCR Form Responses' (formIdx).
     const formResponseFields = [];
     for (let formIdx = 1; formIdx <= 24; formIdx++) {
-      if (formIdx === 23) continue; // Skip X on Form Responses (W -> X on Cable Replacement; Y -> Y)
-      if (FORM_RESPONSE_HIDDEN_COLS.has(formIdx)) continue; // Exclude T (19), U (20), V (21)
+      if (formIdx === 23) continue;
+      if (FORM_RESPONSE_HIDDEN_COLS.has(formIdx)) continue;
 
-      const isDcrIdCol = formIdx === 24; // Column Y is strictly read-only for everyone
+      const isDcrIdCol = formIdx === 24;
       const mainIdx = isDcrIdCol ? 24 : formIdx + 1;
-      const mainColLetter = getColLetter(mainIdx); // C..X, and Y on Cable Replacement
-      const formRespColLetter = getColLetter(formIdx); // B..W, and Y on DCR Form Responses
+      const mainColLetter = getColLetter(mainIdx);
+      const formRespColLetter = getColLetter(formIdx);
       const isEditable =
         !isDcrIdCol && canEditFormResponses && formRespFoundIndex !== -1;
 
@@ -913,11 +1144,10 @@ app.get("/api/dcr/:dcrId", async (req, res) => {
 
 app.post("/api/dcr/:dcrId/comment", async (req, res) => {
   try {
-    const { dcrId } = req.params;
     const { colLetter, text, sheetRowNumber, sheetId } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
 
     if (!colLetter || !text || !String(text).trim()) {
       return res
@@ -927,10 +1157,10 @@ app.post("/api/dcr/:dcrId/comment", async (req, res) => {
 
     const colIndex = colLetterToIndex(colLetter);
     const rowIndex = (Number(sheetRowNumber) || 1) - 1;
-    const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+    const { spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     await sheets.spreadsheets.batchUpdate({
@@ -974,15 +1204,14 @@ app.patch("/api/dcr/:dcrId/comment/:commentId", async (req, res) => {
   try {
     const { commentId } = req.params;
     const { text, sheetRowNumber } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
-
-    const sheets = getSheetsClient(req.headers.authorization);
-    const drive = getDriveClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
+    const { spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     await drive.comments.update({
@@ -1016,14 +1245,13 @@ app.post("/api/dcr/:dcrId/comment/:commentId/reply", async (req, res) => {
   try {
     const { commentId } = req.params;
     const { text, sheetRowNumber } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
-
-    const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
+    const { spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     await sheets.spreadsheets.batchUpdate({
@@ -1068,15 +1296,14 @@ app.patch(
     try {
       const { commentId, replyId } = req.params;
       const { text, sheetRowNumber } = req.body;
-      const token = req.headers.authorization
-        ? req.headers.authorization.split(" ")[1]
-        : "";
-
-      const sheets = getSheetsClient(req.headers.authorization);
-      const drive = getDriveClient(req.headers.authorization);
-      const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+      const sessionCtx = await resolveActiveSession(req, res);
+      const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+      const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
+      const token = sessionCtx.accessToken;
+      const { spreadsheetId } = await resolveRegionSpreadsheet(
         req,
         sheets,
+        sessionCtx,
       );
 
       await drive.replies.update({
@@ -1114,15 +1341,14 @@ app.delete(
     try {
       const { commentId, replyId } = req.params;
       const sheetRowNumber = req.query.sheetRowNumber;
-      const token = req.headers.authorization
-        ? req.headers.authorization.split(" ")[1]
-        : "";
-
-      const sheets = getSheetsClient(req.headers.authorization);
-      const drive = getDriveClient(req.headers.authorization);
-      const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+      const sessionCtx = await resolveActiveSession(req, res);
+      const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+      const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
+      const token = sessionCtx.accessToken;
+      const { spreadsheetId } = await resolveRegionSpreadsheet(
         req,
         sheets,
+        sessionCtx,
       );
 
       await drive.replies.delete({
@@ -1155,14 +1381,13 @@ app.delete(
 app.post("/api/dcr/:dcrId/comment/resolve", async (req, res) => {
   try {
     const { commentId, sheetRowNumber, resolved } = req.body;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
-
-    const sheets = getSheetsClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
+    const { spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     await sheets.spreadsheets.batchUpdate({
@@ -1206,15 +1431,14 @@ app.delete("/api/dcr/:dcrId/comment/:commentId", async (req, res) => {
   try {
     const { commentId } = req.params;
     const sheetRowNumber = req.query.sheetRowNumber;
-    const token = req.headers.authorization
-      ? req.headers.authorization.split(" ")[1]
-      : "";
-
-    const sheets = getSheetsClient(req.headers.authorization);
-    const drive = getDriveClient(req.headers.authorization);
-    const { targetRegion, spreadsheetId } = await resolveRegionSpreadsheet(
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
+    const token = sessionCtx.accessToken;
+    const { spreadsheetId } = await resolveRegionSpreadsheet(
       req,
       sheets,
+      sessionCtx,
     );
 
     await drive.comments.delete({
@@ -1274,9 +1498,10 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
       }
     }
 
-    const sheets = getSheetsClient(req.headers.authorization);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
     const { targetRegion, spreadsheetId, userProfile } =
-      await resolveRegionSpreadsheet(req, sheets);
+      await resolveRegionSpreadsheet(req, sheets, sessionCtx);
 
     const userRole = String(userProfile?.role || "")
       .trim()
@@ -1467,8 +1692,8 @@ app.post("/api/dcr/:dcrId/batch", async (req, res) => {
 app.get("/api/drive/folder/:folderId/files", async (req, res) => {
   try {
     const { folderId } = req.params;
-    const authHeader = req.headers.authorization;
-    const drive = getDriveClient(authHeader);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
 
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
@@ -1488,8 +1713,9 @@ app.get("/api/drive/folder/:folderId/files", async (req, res) => {
     res.json({ files, images });
   } catch (err) {
     console.error("Error listing folder files:", err);
+    const status = err.statusCode || err?.response?.status || 500;
     res
-      .status(500)
+      .status(status)
       .json({ error: err.message || "Failed to list folder files" });
   }
 });
@@ -1613,8 +1839,8 @@ app.post(
       }
 
       const { folderId } = req.params;
-      const authHeader = req.headers.authorization;
-      const drive = getDriveClient(authHeader);
+      const sessionCtx = await resolveActiveSession(req, res);
+      const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
 
       let relativePaths = [];
       if (req.body?.relativePaths) {
@@ -1731,8 +1957,6 @@ app.post(
         return createPromise;
       };
 
-      // Always verify against Drive (bypassCache = true) during folder-prep
-      // so deleted/trashed folders are recreated instead of reusing stale IDs
       for (const dirPath of emptyFolders) {
         if (signal.aborted) {
           throw createAbortError();
@@ -1777,7 +2001,6 @@ app.post(
           signal,
         );
 
-      // Upload files with max 3 concurrent Drive requests and 404 parent recovery
       const uploaded = await runWithConcurrency(
         req.files || [],
         3,
@@ -1804,7 +2027,6 @@ app.post(
               targetParentId,
             );
           } catch (err) {
-            // If cached subfolder was deleted/trashed in Drive, re-verify and retry once
             if (dirPath && isDriveNotFoundError(err) && !signal.aborted) {
               const freshParentId = await ensureDriveFolder(dirPath, true);
               return await uploadSingleFileToDrive(
@@ -1834,7 +2056,7 @@ app.post(
         return;
       }
       console.error("Error uploading file(s) to Google Drive:", err);
-      const status = err?.response?.status || 500;
+      const status = err.statusCode || err?.response?.status || 500;
       if (!res.headersSent) {
         res.status(status).json({
           error: err.message || "Failed to upload files to Google Drive",
@@ -1850,8 +2072,8 @@ app.post(
 app.delete("/api/drive/file/:fileId", async (req, res) => {
   try {
     const { fileId } = req.params;
-    const authHeader = req.headers.authorization;
-    const drive = getDriveClient(authHeader);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
 
     await drive.files.update({
       fileId,
@@ -1861,28 +2083,23 @@ app.delete("/api/drive/file/:fileId", async (req, res) => {
       },
     });
 
-    // Clear cached subfolder IDs in case a folder was moved to trash
     driveSubfolderCache.flushAll();
 
     res.json({ success: true, message: "File moved to Google Drive trash" });
   } catch (err) {
     console.error("Error moving file to Google Drive trash:", err);
-    res.status(500).json({ error: err.message || "Failed to trash file" });
+    const status = err.statusCode || err?.response?.status || 500;
+    res
+      .status(status)
+      .json({ error: err.message || "Failed to trash file" });
   }
 });
 
 app.get("/api/drive/file/:fileId", async (req, res) => {
   try {
     const { fileId } = req.params;
-    const authHeader =
-      req.headers.authorization ||
-      (req.query.token ? `Bearer ${req.query.token}` : null);
-
-    if (!authHeader) {
-      return res.status(401).send("Missing authorization token");
-    }
-
-    const drive = getDriveClient(authHeader);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const drive = getDriveClientFromSession(sessionCtx.oauth2Client);
 
     const response = await drive.files.get(
       { fileId, alt: "media" },
@@ -1900,7 +2117,8 @@ app.get("/api/drive/file/:fileId", async (req, res) => {
       "Error streaming drive file:",
       error?.response?.data || error.message,
     );
-    res.status(500).send("Failed to stream image");
+    const status = error.statusCode || error?.response?.status || 500;
+    res.status(status).send("Failed to stream image");
   }
 });
 
@@ -1908,11 +2126,10 @@ app.get("/api/drive/file/:fileId", async (req, res) => {
 // Master Dashboard Endpoints (Summary, System Ext Data, Mileage Table)
 // ---------------------------------------------------------------------------
 
-async function verifyMasterUser(req, sheets) {
-  const userEmail = await getUserEmailFromAuth(req.headers.authorization);
+async function verifyMasterUser(req, res, sheets, sessionCtx) {
+  const userEmail = await getUserEmailFromSession(sessionCtx);
   const { users } = await getMasterConfig(sheets, false);
   const userProfile = users.find((u) => u.email === userEmail);
-
 
   if (!userProfile) {
     const error = new Error(
@@ -1921,7 +2138,6 @@ async function verifyMasterUser(req, sheets) {
     error.statusCode = 403;
     throw error;
   }
-
 
   const userRole = String(userProfile.role || "")
     .trim()
@@ -1933,7 +2149,6 @@ async function verifyMasterUser(req, sheets) {
     error.statusCode = 403;
     throw error;
   }
-
 
   return { userEmail, userProfile };
 }
@@ -2028,8 +2243,9 @@ async function resolveMasterDropdownOptions(sheets) {
 
 app.get("/api/master", async (req, res) => {
   try {
-    const sheets = getSheetsClient(req.headers.authorization);
-    await verifyMasterUser(req, sheets);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    await verifyMasterUser(req, res, sheets, sessionCtx);
 
     const [batchRes, dropdowns] = await Promise.all([
       sheets.spreadsheets.values.batchGet({
@@ -2046,7 +2262,6 @@ app.get("/api/master", async (req, res) => {
       resolveMasterDropdownOptions(sheets),
     ]);
 
-
     const ranges = batchRes.data.valueRanges || [];
     const summaryControls = ranges[0]?.values || [];
     const summaryRows = ranges[1]?.values || [];
@@ -2055,14 +2270,11 @@ app.get("/api/master", async (req, res) => {
     const mileageRows = ranges[4]?.values || [];
     const mileageTotalsRow = ranges[5]?.values?.[0] || [];
 
-
     const summaryYear = String(summaryControls[0]?.[0] || "").trim();
     const summaryRegion = String(summaryControls[1]?.[0] || "").trim();
 
-
     const sysExtRegion = String(sysExtControls[0]?.[0] || "").trim();
     const sysExtSystem = String(sysExtControls[2]?.[0] || "").trim();
-
 
     res.json({
       summary: {
@@ -2099,8 +2311,9 @@ app.get("/api/master", async (req, res) => {
 
 app.post("/api/master/control", async (req, res) => {
   try {
-    const sheets = getSheetsClient(req.headers.authorization);
-    await verifyMasterUser(req, sheets);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    await verifyMasterUser(req, res, sheets, sessionCtx);
 
     const { tab, cell, value } = req.body;
     const cleanCell = String(cell || "")
@@ -2125,7 +2338,6 @@ app.post("/api/master/control", async (req, res) => {
       requestBody: { values: [[value ?? ""]] },
     });
 
-    // Brief pause so Google Sheets formulas recalculate before reading back
     await new Promise((resolve) => setTimeout(resolve, 650));
 
     if (tab === "Summary") {
@@ -2160,11 +2372,9 @@ app.post("/api/master/control", async (req, res) => {
       resolveMasterDropdownOptions(sheets),
     ]);
 
-
     const ranges = batchRes.data.valueRanges || [];
     const controls = ranges[0]?.values || [];
     const allRows = ranges[1]?.values || [];
-
 
     return res.json({
       success: true,
@@ -2192,15 +2402,15 @@ app.post("/api/master/control", async (req, res) => {
 
 app.post("/api/master/mileage", async (req, res) => {
   try {
-    const sheets = getSheetsClient(req.headers.authorization);
-    await verifyMasterUser(req, sheets);
+    const sessionCtx = await resolveActiveSession(req, res);
+    const sheets = getSheetsClientFromSession(sessionCtx.oauth2Client);
+    await verifyMasterUser(req, res, sheets, sessionCtx);
 
     const { cell, value } = req.body;
     const cleanCell = String(cell || "")
       .trim()
       .toUpperCase();
 
-    // Only allow edits within data rows A3:I119 (row 2 is headers)
     if (!/^[A-I]([3-9]|[1-9][0-9]|10[0-9]|11[0-9])$/.test(cleanCell)) {
       return res.status(400).json({
         error: `Cell "${cleanCell}" is outside the editable Mileage Table range (A3:I119).`,
@@ -2214,7 +2424,6 @@ app.post("/api/master/mileage", async (req, res) => {
       requestBody: { values: [[value ?? ""]] },
     });
 
-    // Brief pause so SUM formulas in D122:I122 update
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     const totalsRes = await sheets.spreadsheets.values.get({

@@ -42,7 +42,7 @@ export default function Data({
   availableTabs = [],
 }) {
   const navigate = useNavigate();
-  const { accessToken, logout } = useContext(AuthContext);
+  const { isAuthenticated, logout } = useContext(AuthContext);
   const { showToast } = useToast();
 
   const [editingCell, setEditingCell] = useState(null);
@@ -66,10 +66,10 @@ export default function Data({
   }, [searchQuery, setPage]);
 
   useEffect(() => {
-    if (accessToken && (!sheetData || sheetData.length === 0)) {
+    if (isAuthenticated && (!sheetData || sheetData.length === 0)) {
       fetchSheet();
     }
-  }, [accessToken, tabName]);
+  }, [isAuthenticated, tabName, sheetData, fetchSheet]);
 
   const headers = useMemo(() => sheetData[0] || [], [sheetData]);
   const rawRows = useMemo(
@@ -161,7 +161,7 @@ export default function Data({
   }, [tabName, availableTabs, currentPageRows.length, loading]);
 
   const handleSaveCell = async () => {
-    if (!editingCell || !accessToken) return;
+    if (!editingCell || !isAuthenticated) return;
     const { cellA1, value, sheetRow, colIndex } = editingCell;
 
     const previous = [...sheetData];
@@ -176,8 +176,8 @@ export default function Data({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
+        credentials: "include",
         body: JSON.stringify({ tabName, cell: cellA1, value }),
       });
 
@@ -970,7 +970,7 @@ export default function Data({
               </button>
             </div>
             <img
-              src={`/api/drive/file/${previewPhotoId}?token=${encodeURIComponent(accessToken)}`}
+              src={`/api/drive/file/${encodeURIComponent(previewPhotoId)}`}
               alt="Preview"
               style={{
                 maxWidth: "100%",

@@ -78,13 +78,12 @@ export default function Coordinator({
   sheetData,
   onRefresh,
   loading,
-  accessToken,
   onStatusUpdated,
   dropdownOptions = {},
 }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { activeRegion } = useContext(AuthContext);
+  const { activeRegion, logout } = useContext(AuthContext);
 
   const statusOptions = useMemo(() => {
     if (dropdownOptions?.AG && dropdownOptions.AG.length > 0) {
@@ -273,10 +272,10 @@ export default function Coordinator({
     const hasContractorFilter = selectedContractors.length > 0;
 
     rows.forEach((row) => {
-      const tech = String(row[30] || "").trim(); // Col AE[cite: 23]
-      const status = String(row[32] || "").trim(); // Col AG[cite: 23]
-      const rawContractor = String(row[34] || "").trim(); // Col AI[cite: 23]
-      const dcrId = String(row[24] || "").trim(); // Col Y[cite: 23]
+      const tech = String(row[30] || "").trim(); // Col AE
+      const status = String(row[32] || "").trim(); // Col AG
+      const rawContractor = String(row[34] || "").trim(); // Col AI
+      const dcrId = String(row[24] || "").trim(); // Col Y
 
       // Filter by technician
       if (selectedTech !== "All" && tech !== selectedTech) {
@@ -285,7 +284,10 @@ export default function Coordinator({
 
       // Parse comma-separated contractors for this row
       const rowContractors = rawContractor
-        ? rawContractor.split(",").map((s) => s.trim()).filter(Boolean)
+        ? rawContractor
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
         : [];
 
       // Filter by multi-selected contractors (match if any selected contractor is present)
@@ -361,7 +363,10 @@ export default function Coordinator({
       let contractorMatch = true;
       if (hasContractorFilter) {
         const rowContractors = rawContractor
-          ? rawContractor.split(",").map((s) => s.trim()).filter(Boolean)
+          ? rawContractor
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
           : [];
         contractorMatch = selectedContractors.some((c) =>
           rowContractors.includes(c),
@@ -424,8 +429,8 @@ export default function Coordinator({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           tabName: "Cable Replacement",
           cell: `AG${sheetRowNumber}`,
@@ -433,6 +438,11 @@ export default function Coordinator({
           region: activeRegion?.id,
         }),
       });
+
+      if (res.status === 401) {
+        logout?.(true);
+        return;
+      }
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -861,7 +871,14 @@ export default function Coordinator({
           </div>
 
           {/* Filter Cluster: Technician & Contractor */}
-          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+              flexWrap: "wrap",
+            }}
+          >
             {/* Technician Single-Select */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <label
@@ -891,7 +908,12 @@ export default function Coordinator({
             {/* Contractor Multi-Select Dropdown */}
             <div
               ref={contractorDropdownRef}
-              style={{ position: "relative", display: "flex", alignItems: "center", gap: "8px" }}
+              style={{
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
             >
               <label
                 style={{
@@ -917,7 +939,9 @@ export default function Coordinator({
                 >
                   {contractorButtonLabel}
                 </span>
-                <span style={{ fontSize: "10px", opacity: 0.6, marginLeft: "4px" }}>
+                <span
+                  style={{ fontSize: "10px", opacity: 0.6, marginLeft: "4px" }}
+                >
                   {contractorDropdownOpen ? "▲" : "▼"}
                 </span>
               </button>
@@ -952,7 +976,13 @@ export default function Coordinator({
                   )}
 
                   {contractorOptions.length === 0 ? (
-                    <div style={{ padding: "12px 14px", fontSize: "12px", color: "var(--text-subtle)" }}>
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        fontSize: "12px",
+                        color: "var(--text-subtle)",
+                      }}
+                    >
                       No contractors found
                     </div>
                   ) : (
@@ -964,11 +994,23 @@ export default function Coordinator({
                           onClick={() => toggleContractor(contractor)}
                           className={`multi-dropdown-item ${isSelected ? "selected" : ""}`}
                         >
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
                             {contractor}
                           </span>
                           {isSelected && (
-                            <span style={{ color: "#16a34a", fontWeight: 700, marginLeft: "8px" }}>
+                            <span
+                              style={{
+                                color: "#16a34a",
+                                fontWeight: 700,
+                                marginLeft: "8px",
+                              }}
+                            >
                               ✓
                             </span>
                           )}

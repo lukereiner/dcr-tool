@@ -18,7 +18,7 @@ import { SelectionSummaryInline } from "../components/master/CellSelectionTools"
 const MASTER_TABS = ["Summary", "System Ext Data", "Mileage Table"];
 
 export default function Master() {
-  const { accessToken, logout, refreshSignal, userProfile } =
+  const { isAuthenticated, logout, refreshSignal, userProfile } =
     useContext(AuthContext);
   const { showToast } = useToast();
 
@@ -73,12 +73,22 @@ export default function Master() {
 
   const fetchMasterData = useCallback(
     async (showSuccessToast = false) => {
-      if (!accessToken || !isDirector) return;
-      setLoading(true);
-      try {
-        const res = await fetch("/api/master", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+      if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+    if (!userProfile) {
+      return;
+    }
+    if (!isDirector) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/master", {
+        credentials: "include",
+      });
 
         if (res.status === 401) {
           logout(true);
@@ -116,7 +126,7 @@ export default function Master() {
         setLoading(false);
       }
     },
-    [accessToken, isDirector, logout, showToast],
+    [isAuthenticated, isDirector, logout, showToast],
   );
 
   useEffect(() => {
@@ -132,7 +142,7 @@ export default function Master() {
   }, [refreshSignal, fetchMasterData]);
 
   const handleControlChange = async (tab, cell, value) => {
-    if (!accessToken) return;
+    if (!isAuthenticated) return;
 
     setMasterData((prev) => {
       if (tab === "Summary") {
@@ -156,7 +166,7 @@ export default function Master() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          credentials: "include",
         },
         body: JSON.stringify({ tab, cell, value }),
       });
@@ -188,7 +198,7 @@ export default function Master() {
     sheetRowNumber,
     colIndex,
   ) => {
-    if (!accessToken) return false;
+    if (!isAuthenticated) return false;
 
     const previousRows = masterData.mileage.rows;
     const targetIdx = sheetRowNumber - 2;
@@ -213,7 +223,7 @@ export default function Master() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          credentials: "include",
         },
         body: JSON.stringify({ cell: cellA1, value }),
       });

@@ -42,22 +42,44 @@ const DEFAULT_DROPDOWN_OPTIONS = {
   AL: ["Yes", "No"],
 };
 
-// Login View with extended openid email profile scopes
+// Login View using OAuth 2.0 Authorization Code flow exchanged on the backend
 function LoginView({ onLoginSuccess, sessionExpired }) {
   const [loginError, setLoginError] = useState("");
+  const [exchangingCode, setExchangingCode] = useState(false);
 
   const login = useGoogleLogin({
+    flow: "auth-code",
+    hint: localStorage.getItem("dcr_last_email") || undefined,
     scope:
       "openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive",
-    prompt: "select_account",
-    onSuccess: (tokenResponse) => {
-      setLoginError("");
-      const expiresInMs = (tokenResponse.expires_in || 3600) * 1000 - 300000;
-      const expiryTimestamp = Date.now() + expiresInMs;
+    onSuccess: async (codeResponse) => {
+      if (!codeResponse?.code) {
+        setLoginError("Google did not return an authorization code.");
+        return;
+      }
 
-      sessionStorage.setItem("dcr_access_token", tokenResponse.access_token);
-      sessionStorage.setItem("dcr_token_expiry", String(expiryTimestamp));
-      onLoginSuccess(tokenResponse.access_token);
+      setLoginError("");
+      setExchangingCode(true);
+      try {
+        const res = await fetch("/api/auth/google", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ code: codeResponse.code }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Failed to complete Google sign-in.");
+        }
+
+        onLoginSuccess();
+      } catch (err) {
+        console.error("Google Sign-in exchange failed:", err);
+        setLoginError(err.message || "Failed to sign in with Google.");
+      } finally {
+        setExchangingCode(false);
+      }
     },
     onError: (err) => {
       console.error("Google Sign-in failed:", err);
@@ -136,6 +158,8 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
         )}
 
         <button
+          type="button"
+          disabled={exchangingCode}
           onClick={() => {
             setLoginError("");
             login();
@@ -150,14 +174,21 @@ function LoginView({ onLoginSuccess, sessionExpired }) {
             color: "#fff",
             border: "none",
             borderRadius: "4px",
-            cursor: "pointer",
+            cursor: exchangingCode ? "not-allowed" : "pointer",
+            opacity: exchangingCode ? 0.75 : 1,
             fontSize: "15px",
             fontWeight: 500,
             width: "100%",
           }}
         >
-          Sign in with
-          <FaGoogle />
+          {exchangingCode ? (
+            "Signing in..."
+          ) : (
+            <>
+              Sign in with
+              <FaGoogle />
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -300,17 +331,9 @@ function NavigationBar({
 // Inner App with Global State & Dynamic Region Management
 function AppContent() {
   const { showToast } = useToast();
-  const [accessToken, setAccessToken] = useState(() => {
-    const token = sessionStorage.getItem("dcr_access_token");
-    const expiry = Number(sessionStorage.getItem("dcr_token_expiry") || 0);
-    if (token && expiry && Date.now() < expiry) {
-      return token;
-    }
-    sessionStorage.removeItem("dcr_access_token");
-    sessionStorage.removeItem("dcr_token_expiry");
-    return null;
-  });
 
+  // Session state is managed via HttpOnly cookie on the server; null means unauthenticated/expired
+  const [isAuthenticated, setIsAuthenticated] = useState(null);
   const [sessionExpired, setSessionExpired] = useState(false);
 
   // Active tab in Sheet Data (persists across route navigation)
@@ -334,39 +357,45 @@ function AppContent() {
     DEFAULT_DROPDOWN_OPTIONS,
   );
 
-  const logout = (dueToExpiry = false) => {
-    sessionStorage.removeItem("dcr_access_token");
-    sessionStorage.removeItem("dcr_token_expiry");
-    setAccessToken(null);
+  const logout = useCallback(async (dueToExpiry = false) => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // Ignore network errors during logout cleanup
+    }
+
+    setIsAuthenticated(false);
     setAllowedRegions([]);
     setActiveRegion(null);
     setUserProfile(null);
     setSheetDataByTab({});
     setAvailableTabs([]);
     setSessionExpired(dueToExpiry);
-  };
+  }, []);
 
-  const handleLoginSuccess = (token) => {
-    setAccessToken(token);
-    setSessionExpired(false);
-  };
-
-  // Bootstrap user permissions & allowed regions from Master Sheet
+    // Bootstrap user permissions & allowed regions from Master Sheet using HttpOnly session cookie
   const fetchUserConfig = useCallback(async () => {
-    if (!accessToken) return;
     try {
       const res = await fetch("/api/auth/me", {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
       });
 
       if (res.status === 401) {
-        logout(true);
+        setIsAuthenticated(false);
+        setAllowedRegions([]);
+        setActiveRegion(null);
+        setUserProfile(null);
         return;
       }
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
+      setIsAuthenticated(true);
+      setSessionExpired(false);
       setUserProfile({ email: data.email, role: data.role });
       setAllowedRegions(data.allowedRegions || []);
 
@@ -384,23 +413,29 @@ function AppContent() {
     } catch (err) {
       showToast(`User authorization error: ${err.message}`, "error");
     }
-  }, [accessToken]);
+  }, [showToast]);
+
+  const handleLoginSuccess = useCallback(() => {
+    setIsAuthenticated(true);
+    setSessionExpired(false);
+    fetchUserConfig();
+  }, [fetchUserConfig]);
+
+
 
   useEffect(() => {
-    if (accessToken) {
-      fetchUserConfig();
-    }
-  }, [accessToken, fetchUserConfig]);
+    fetchUserConfig();
+  }, [fetchUserConfig]);
 
   // Fetch sheet data for a specific tab in the active region
   const fetchSheet = useCallback(
     async (forceRefresh = false, targetTab = tabName) => {
-      if (!accessToken || !activeRegion || !targetTab) return;
+      if (!isAuthenticated || !activeRegion || !targetTab) return;
       setLoading(true);
       try {
         const url = `/api/sheet?tab=${encodeURIComponent(targetTab)}&region=${encodeURIComponent(activeRegion.id)}${forceRefresh ? "&refresh=true" : ""}`;
         const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
         });
 
         if (res.status === 401) {
@@ -418,7 +453,10 @@ function AppContent() {
 
         if (data.tabs) {
           setAvailableTabs(data.tabs);
-          if (!data.tabs.includes(targetTab) && targetTab !== "Cable Replacement") {
+          if (
+            !data.tabs.includes(targetTab) &&
+            targetTab !== "Cable Replacement"
+          ) {
             setTabName("Cable Replacement");
           }
         }
@@ -431,26 +469,26 @@ function AppContent() {
         setLoading(false);
       }
     },
-    [accessToken, activeRegion, tabName, showToast],
+    [isAuthenticated, activeRegion, tabName, logout, showToast],
   );
 
   // Load "Cable Replacement" (for Coordinator) and active Sheet Data tab on region/auth change
   useEffect(() => {
-    if (!accessToken || !activeRegion) return;
+    if (!isAuthenticated || !activeRegion) return;
 
     fetchSheet(false, "Cable Replacement");
     if (tabName !== "Cable Replacement") {
       fetchSheet(false, tabName);
     }
-  }, [accessToken, activeRegion?.id]);
+  }, [isAuthenticated, activeRegion?.id]);
 
   // Lazy-load any newly selected tab in Sheet Data if not yet cached in memory
   useEffect(() => {
-    if (!accessToken || !activeRegion) return;
+    if (!isAuthenticated || !activeRegion) return;
     if (!sheetDataByTab[tabName]) {
       fetchSheet(false, tabName);
     }
-  }, [accessToken, activeRegion?.id, tabName]);
+  }, [isAuthenticated, activeRegion?.id, tabName]);
 
   const handleRegionChange = (newRegionId) => {
     const nextRegion = allowedRegions.find((r) => r.id === newRegionId);
@@ -525,7 +563,7 @@ function AppContent() {
   return (
     <AuthContext.Provider
       value={{
-        accessToken,
+        isAuthenticated,
         logout,
         refreshSignal,
         activeRegion,
@@ -534,7 +572,20 @@ function AppContent() {
       }}
     >
       <BrowserRouter>
-        {!accessToken ? (
+        {isAuthenticated === null ? (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              minHeight: "80vh",
+              color: "var(--text-muted)",
+              fontSize: "14px",
+            }}
+          >
+            Checking session...
+          </div>
+        ) : !isAuthenticated ? (
           <LoginView
             onLoginSuccess={handleLoginSuccess}
             sessionExpired={sessionExpired}
@@ -589,7 +640,6 @@ function AppContent() {
                       sheetData={coordinatorSheetData}
                       onRefresh={handleGlobalRefresh}
                       loading={loading}
-                      accessToken={accessToken}
                       onStatusUpdated={handleStatusUpdated}
                       dropdownOptions={dropdownOptions}
                       activeRegion={activeRegion}

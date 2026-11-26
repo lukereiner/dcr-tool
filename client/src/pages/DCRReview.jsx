@@ -690,7 +690,6 @@ function CellCommentMarker({
   const [isReplying, setIsReplying] = useState(false);
   const popoverRef = useRef(null);
 
-  // Show card when pinned (even if sidebar is open after posting) or on hover preview when sidebar is closed
   const isVisible = isPinned || (isPreview && !commentsDrawerOpen);
 
   return (
@@ -919,16 +918,14 @@ export default function DCRReview({
 }) {
   const { dcrId } = useParams();
   const navigate = useNavigate();
-  const { accessToken, logout, refreshSignal, activeRegion, userProfile } =
+  const { isAuthenticated, logout, refreshSignal, activeRegion, userProfile } =
     useContext(AuthContext);
   const { showToast } = useToast();
 
   const [dcrData, setDcrData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Main sheet ('Cable Replacement') form values
   const [formValues, setFormValues] = useState({});
-  // Source-of-truth sheet ('DCR Form Responses') form values (keyed by formRespColLetter B..W)
   const [formResponseValues, setFormResponseValues] = useState({});
   const [formResponseDropdowns, setFormResponseDropdowns] = useState(
     FORM_RESPONSE_DROPDOWN_FALLBACKS,
@@ -946,22 +943,18 @@ export default function DCRReview({
   const [commentsDrawerOpen, setCommentsDrawerOpen] = useState(false);
   const [showResolvedComments, setShowResolvedComments] = useState(false);
 
-  // Floating Popover States (Hover Preview, Pinning, and New Comment Creation)
   const [hoveredCommentCol, setHoveredCommentCol] = useState(null);
   const [pinnedCommentCol, setPinnedCommentCol] = useState(null);
   const [newCommentCol, setNewCommentCol] = useState(null);
   const hoverTimeoutRef = useRef(null);
 
-  // States for Sidebar Inline Composers
   const [activeReplyBoxId, setActiveReplyBoxId] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editingReplyId, setEditingReplyId] = useState(null);
 
-  // Dirty tracking for 'Cable Replacement'
   const [dirtyFields, setDirtyFields] = useState(new Set());
   const [fieldStatuses, setFieldStatuses] = useState({});
 
-  // Dirty tracking for 'DCR Form Responses' (keyed by formRespColLetter B..W)
   const [dirtyFormResponseFields, setDirtyFormResponseFields] = useState(
     new Set(),
   );
@@ -999,7 +992,6 @@ export default function DCRReview({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [folderUrl, setFolderUrl] = useState("");
 
-  // Drag and Drop & Uploading States
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({
@@ -1012,7 +1004,6 @@ export default function DCRReview({
   const uploadAbortControllerRef = useRef(null);
   const uploadCancelledRef = useRef(false);
 
-  // File Delete Confirmation Modal States
   const [fileToDelete, setFileToDelete] = useState(null);
   const [isDeletingFile, setIsDeletingFile] = useState(false);
 
@@ -1145,8 +1136,8 @@ export default function DCRReview({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           updates: mainSnapshot,
           formResponseUpdates: respSnapshot,
@@ -1224,7 +1215,6 @@ export default function DCRReview({
               (f) => f.formRespColLetter === formRespColLetter,
             );
             if (fieldDef) {
-              // fieldDef.colIndex is the corresponding index on 'Cable Replacement' (C..X)
               onRecordUpdated(dcrData.sheetRowNumber, fieldDef.colIndex, val);
             }
           });
@@ -1290,7 +1280,6 @@ export default function DCRReview({
   }, [
     dcrData,
     dcrId,
-    accessToken,
     logout,
     onRecordUpdated,
     showToast,
@@ -1321,7 +1310,6 @@ export default function DCRReview({
     };
   }, []);
 
-  // Handler for 'Cable Replacement' editable fields
   const handleFieldChange = (colLetter, value) => {
     setFormValues((prev) => ({
       ...prev,
@@ -1355,7 +1343,6 @@ export default function DCRReview({
     }, 3000);
   };
 
-  // Handler for 'DCR Form Responses' editable fields (keyed by formRespColLetter B..W)
   const handleFormResponseChange = (formRespColLetter, value) => {
     setFormResponseValues((prev) => ({
       ...prev,
@@ -1423,7 +1410,6 @@ export default function DCRReview({
     }
   };
 
-  // Open cell-anchored new-comment popover regardless of sidebar visibility
   const handleInitiateNewComment = (colLetter) => {
     setPinnedCommentCol(null);
     setHoveredCommentCol(null);
@@ -1502,7 +1488,6 @@ export default function DCRReview({
       return;
     }
 
-    // Synchronously capture entries before any async await clears dataTransfer.items
     const dataItems = e.dataTransfer.items
       ? Array.from(e.dataTransfer.items)
       : [];
@@ -1537,7 +1522,6 @@ export default function DCRReview({
       return;
     }
 
-    // Fallback for browsers without webkitGetAsEntry
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const plainItems = Array.from(e.dataTransfer.files).map((file) => ({
         file,
@@ -1576,7 +1560,6 @@ export default function DCRReview({
     });
 
     try {
-      // 1. Pre-create any folder hierarchy first so parallel workers never race
       const allDirPathsSet = new Set(emptyFolders);
       fileEntries.forEach(({ relativePath }) => {
         const rel = String(relativePath || "");
@@ -1593,12 +1576,15 @@ export default function DCRReview({
 
         const prepRes = await fetch(`/api/drive/folder/${folderId}/upload`, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
+          credentials: "include",
           body: prepFormData,
           signal: controller.signal,
         });
+
+        if (prepRes.status === 401) {
+          logout(true);
+          return;
+        }
 
         const prepData = await prepRes.json();
         if (!prepRes.ok) {
@@ -1606,7 +1592,6 @@ export default function DCRReview({
         }
       }
 
-      // 2. Upload files with a concurrency pool of 3 and live progress updates
       let completedCount = 0;
       let nextIndex = 0;
       const concurrency = Math.min(3, fileEntries.length);
@@ -1635,12 +1620,15 @@ export default function DCRReview({
 
           const res = await fetch(`/api/drive/folder/${folderId}/upload`, {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-            },
+            credentials: "include",
             body: formData,
             signal: controller.signal,
           });
+
+          if (res.status === 401) {
+            logout(true);
+            return;
+          }
 
           const data = await res.json();
           if (!res.ok) {
@@ -1697,10 +1685,13 @@ export default function DCRReview({
     try {
       const res = await fetch(`/api/drive/file/${targetFile.id}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        credentials: "include",
       });
+
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
 
       const data = await res.json();
       if (!res.ok)
@@ -1727,8 +1718,8 @@ export default function DCRReview({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           colLetter,
           text,
@@ -1737,6 +1728,10 @@ export default function DCRReview({
           region: activeRegion?.id,
         }),
       });
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1756,14 +1751,18 @@ export default function DCRReview({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
           },
+          credentials: "include",
           body: JSON.stringify({
             text,
             sheetRowNumber: dcrData?.sheetRowNumber,
           }),
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1782,14 +1781,18 @@ export default function DCRReview({
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
           },
+          credentials: "include",
           body: JSON.stringify({
             text,
             sheetRowNumber: dcrData?.sheetRowNumber,
           }),
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1808,14 +1811,18 @@ export default function DCRReview({
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
           },
+          credentials: "include",
           body: JSON.stringify({
             text,
             sheetRowNumber: dcrData?.sheetRowNumber,
           }),
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1838,9 +1845,13 @@ export default function DCRReview({
         `/api/dcr/${encodeURIComponent(dcrId)}/comment/${encodeURIComponent(commentId)}?sheetRowNumber=${dcrData?.sheetRowNumber}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1857,9 +1868,13 @@ export default function DCRReview({
         `/api/dcr/${encodeURIComponent(dcrId)}/comment/${encodeURIComponent(commentId)}/reply/${encodeURIComponent(replyId)}?sheetRowNumber=${dcrData?.sheetRowNumber}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${accessToken}` },
+          credentials: "include",
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1877,8 +1892,8 @@ export default function DCRReview({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
           },
+          credentials: "include",
           body: JSON.stringify({
             commentId,
             resolved: !currentResolvedStatus,
@@ -1886,6 +1901,10 @@ export default function DCRReview({
           }),
         },
       );
+      if (res.status === 401) {
+        logout(true);
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setComments(data.comments || []);
@@ -1899,13 +1918,43 @@ export default function DCRReview({
     }
   };
 
+  const fetchFolderPhotos = useCallback(
+    async (folderId) => {
+      setPhotosLoading(true);
+      try {
+        const res = await fetch(`/api/drive/folder/${folderId}/files`, {
+          credentials: "include",
+        });
+        if (res.status === 401) {
+          logout(true);
+          return;
+        }
+        const data = await res.json();
+        if (res.ok) {
+          const allFiles = data.files || [];
+          const imgFiles =
+            data.images ||
+            allFiles.filter((f) => f.mimeType?.startsWith("image/"));
+          setFolderFiles(allFiles);
+          setPhotos(imgFiles);
+          setActivePhotoIndex(0);
+        }
+      } catch (err) {
+        console.error("Failed to load folder files:", err);
+      } finally {
+        setPhotosLoading(false);
+      }
+    },
+    [logout],
+  );
+
   const loadDcr = async (force = false) => {
-    if (!accessToken || !activeRegion) return;
+    if (!isAuthenticated || !activeRegion) return;
     setLoading(true);
     try {
       const url = `/api/dcr/${encodeURIComponent(dcrId)}?region=${encodeURIComponent(activeRegion.id)}${force ? "&refresh=true" : ""}`;
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        credentials: "include",
       });
 
       if (res.status === 401) {
@@ -1974,33 +2023,10 @@ export default function DCRReview({
     }
   };
 
-  const fetchFolderPhotos = async (folderId) => {
-    setPhotosLoading(true);
-    try {
-      const res = await fetch(`/api/drive/folder/${folderId}/files`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const allFiles = data.files || [];
-        const imgFiles =
-          data.images ||
-          allFiles.filter((f) => f.mimeType?.startsWith("image/"));
-        setFolderFiles(allFiles);
-        setPhotos(imgFiles);
-        setActivePhotoIndex(0);
-      }
-    } catch (err) {
-      console.error("Failed to load folder files:", err);
-    } finally {
-      setPhotosLoading(false);
-    }
-  };
-
   const lastSignalRef = React.useRef(refreshSignal);
   useEffect(() => {
-    if (activeRegion) loadDcr(false);
-  }, [dcrId, accessToken, activeRegion?.id]);
+    if (isAuthenticated && activeRegion) loadDcr(false);
+  }, [dcrId, isAuthenticated, activeRegion?.id]);
   useEffect(() => {
     if (refreshSignal > lastSignalRef.current) {
       lastSignalRef.current = refreshSignal;
@@ -2416,7 +2442,7 @@ export default function DCRReview({
             </div>
           </div>
 
-          {/* Section 2: DCR Form Data (Cols C through X & Y on Cable Replacement; writes back to DCR Form Responses) */}
+          {/* Section 2: DCR Form Data */}
           <div
             style={{
               background: "var(--bg-card)",
@@ -2473,8 +2499,6 @@ export default function DCRReview({
               }}
             >
               {formResponseFields.map((f) => {
-                // f.colLetter = 'Cable Replacement' column ('C'..'X', 'Y') -> used for headers, IDs, and comments
-                // f.formRespColLetter = 'DCR Form Responses' column ('B'..'W', 'Y') -> used for values, dropdowns, and saving
                 const mainColLetter = f.colLetter;
                 const formRespColLetter = f.formRespColLetter || f.colLetter;
                 const isExpanded = !!expandedFields[mainColLetter];
@@ -2488,7 +2512,6 @@ export default function DCRReview({
                 const activeComment = getActiveCommentForCol(mainColLetter);
                 const isNewCommentOpen = newCommentCol === mainColLetter;
 
-                // Dropdown options keyed by 'DCR Form Responses' column letter (E, H, I, J, Q, R)
                 let dropdownOptions = null;
                 if (f.inputType === "select") {
                   const rawOptions =
@@ -2924,7 +2947,7 @@ export default function DCRReview({
                       ◀
                     </button>
                     <img
-                      src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
+                      src={`/api/drive/file/${encodeURIComponent(activePhoto.id)}`}
                       alt={activePhoto.name}
                       onClick={() => setLightboxOpen(true)}
                       style={{
@@ -3002,7 +3025,7 @@ export default function DCRReview({
                         }}
                       >
                         <img
-                          src={`/api/drive/file/${photo.id}?token=${encodeURIComponent(accessToken)}`}
+                          src={`/api/drive/file/${encodeURIComponent(photo.id)}`}
                           alt={photo.name}
                           style={{
                             width: "100%",
@@ -3016,7 +3039,6 @@ export default function DCRReview({
                 </div>
               )
             ) : (
-              /* Files Table with Drag & Drop Overlay Support */
               <div
                 onDragEnter={handleFilesDragEnter}
                 onDragLeave={handleFilesDragLeave}
@@ -3143,7 +3165,6 @@ export default function DCRReview({
                         )}
                       </div>
 
-                      {/* Progress Bar Track */}
                       <div
                         style={{
                           width: "100%",
@@ -4626,7 +4647,7 @@ export default function DCRReview({
               </button>
             </div>
             <img
-              src={`/api/drive/file/${activePhoto.id}?token=${encodeURIComponent(accessToken)}`}
+              src={`/api/drive/file/${encodeURIComponent(activePhoto.id)}`}
               alt={activePhoto.name}
               style={{
                 maxWidth: "100%",
