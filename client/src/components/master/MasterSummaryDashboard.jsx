@@ -440,9 +440,6 @@ export default function MasterSummaryDashboard({
               >
                 Monthly Trend — {activeMetric.label}
               </div>
-              <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                Hover any bar for monthly details or switch metrics
-              </div>
             </div>
 
             <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>

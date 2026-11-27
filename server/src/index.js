@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 const SESSION_COOKIE_NAME = "dcr_session";
-const INACTIVITY_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours sliding inactivity timeout
+const INACTIVITY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000; // 90 days sliding inactivity timeout
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh access token 5 min before expiry
 const GOOGLE_CLIENT_ID =
   process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -188,7 +188,7 @@ async function resolveActiveSession(req, res) {
   if (!lastActive || now - lastActive > INACTIVITY_WINDOW_MS) {
     clearSessionCookie(req, res);
     const err = new Error(
-      "Session expired due to 2 hours of inactivity. Please sign in again.",
+      "Session expired due inactivity. Please sign in again.",
     );
     err.statusCode = 401;
     throw err;
